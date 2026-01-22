@@ -18,6 +18,12 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - 🐢 Supports optional Pandoc for better Markdown rendering
 - 🔍 Verbose mode for detailed output and easier troubleshooting
 
+## Support
+
+If you find this script useful, please consider supporting me on Patreon:
+
+❤️ [Support on Patreon](https://patreon.com/MichaelKirkland)
+
 ---
 
 ## 📦 Requirements
