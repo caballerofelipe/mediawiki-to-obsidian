@@ -22,6 +22,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 
 If you find this script useful, please consider supporting me on Patreon:
 
+☕️ [Buy Me a Coffee](https://buymeacoffee.com/chronicler)
 ❤️ [Support on Patreon](https://patreon.com/MichaelKirkland)
 
 ---
