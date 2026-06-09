@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument("input_xml", help="Input XML file")
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
+    parser.add_argument("--skip-pandoc", action="store_true", help="Skip Pandoc conversion even if available")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("--cookies", help="Cookie header value for API/image requests (e.g. 'name=value; other=value')")
     return parser.parse_args()
@@ -43,6 +44,7 @@ logging.basicConfig(
 INPUT_XML = args.input_xml
 OUTPUT_DIR = args.output_dir
 SKIP_REDIRECTS = args.skip_redirects
+SKIP_PANDOC = args.skip_pandoc
 COOKIES = args.cookies
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -356,8 +358,9 @@ def convert_pages(tree):
 
             raw_text = text_elem.text
             yaml_str, wikitext, tags = clean_and_convert_text(raw_text, title)
-            wikitext = convert_with_pandoc(wikitext, title)
-            wikitext = cleanup_markdown(wikitext)
+            if not SKIP_PANDOC:
+                wikitext = convert_with_pandoc(wikitext, title)
+                wikitext = cleanup_markdown(wikitext)
             markdown = f"{yaml_str}\n{wikitext.strip()}\n"
             base_filename = clean_filename(title)
             count = filename_counts[base_filename]
