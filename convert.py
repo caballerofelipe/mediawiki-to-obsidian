@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--cookies", help="Cookie header value for API/image requests (e.g. 'name=value; other=value')")
     return parser.parse_args()
 
 args = parse_args()
@@ -42,6 +43,7 @@ logging.basicConfig(
 INPUT_XML = args.input_xml
 OUTPUT_DIR = args.output_dir
 SKIP_REDIRECTS = args.skip_redirects
+COOKIES = args.cookies
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -110,7 +112,7 @@ def get_image_url(filename):
         "iiprop": "url",
     }
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = requests.get(url, params=params, timeout=10, headers={"Cookie": COOKIES} if COOKIES else None)
         data = resp.json()
         pages = data.get("query", {}).get("pages", {})
         for page in pages.values():
@@ -137,7 +139,7 @@ def download_image(image_name):
         return None
 
     try:
-        resp = requests.get(url, stream=True)
+        resp = requests.get(url, stream=True, headers={"Cookie": COOKIES} if COOKIES else None)
         if resp.status_code == 200:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
