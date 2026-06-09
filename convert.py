@@ -109,7 +109,7 @@ def extract_images(wikicode):
     for i, node in enumerate(nodes):
         if isinstance(node, mwparserfromhell.wikicode.Wikilink):
             target = node.title.strip()
-            if target.lower().startswith(("file:", "image:")):
+            if target.lower().startswith(("file:", "image:", "media:")):
                 image_name = target.split(":", 1)[1].strip()
                 local_filename = download_image(image_name)
 
