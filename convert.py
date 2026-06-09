@@ -20,14 +20,6 @@ p = inflect.engine()
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 IMAGE_DIR = "images"
 
-# Pre-compiled regex patterns
-INVALID_FILENAME_CHARS = re.compile(r'[\\/*?:"<>|]')
-HEADING_ID_REGEX = re.compile(r'^(#{1,6} .+?)\s*\{\#.*?\}', re.MULTILINE)
-WIKILINK_REGEX = re.compile(r'\[\[(.*?)\]\]', re.DOTALL)
-PANDOC_LINK_REGEX = re.compile(
-    r'\[([^\]]+)\]\(((?:[^\(\)]+|\([^\)]*\))+)(?:\s+"wikilink")?\)'
-)
-
 def TAG(t):
     return f"{{{NS}}}{t}"
 
@@ -72,25 +64,10 @@ def extract_wiki_url(tree):
 
 def clean_filename(title):
     """Convert to safe filename with underscores"""
-    return INVALID_FILENAME_CHARS.sub('_', title.strip())
+    return re.compile(r'[\\/*?:"<>|{}]').sub('_', title.strip())
 
 def normalize_tag(tag):
     return tag.replace(" ", "_").lower()
-
-def display_title(title):
-    """Convert to human-readable title with spaces"""
-    return title.replace('_', ' ')
-
-def clean_wikilink(link_content):
-    """Centralized wikilink cleaning"""
-    if '|' in link_content:
-        target, alias = link_content.split('|', 1)
-        return f"[[{target.replace('_', ' ')}|{alias}]]"
-    return f"[[{link_content.replace('_', ' ')}]]"
-
-def fix_wikilink_spacing(text):
-    """Convert underscores to spaces in wikilinks using centralized cleaner"""
-    return WIKILINK_REGEX.sub(lambda m: clean_wikilink(m.group(1)), text)
 
 def extract_categories(wikicode):
     categories = []
@@ -199,7 +176,7 @@ def extract_infobox(wikicode):
         key = param.name.strip().replace(":", "").lower()
         val = param.value.strip()
 
-        wikilinks = WIKILINK_REGEX.findall(val)
+        wikilinks = re.compile(r'\[\[(.*?)\]\]', re.DOTALL).findall(val)
         if wikilinks:
             parts = []
             remaining = val
@@ -236,33 +213,40 @@ def sanitize_for_yaml(obj):
         return str(obj)
 
 def extract_yaml_header(title, tags, extra_fields=None):
-    header = {
-        'title': display_title(title),
-        'tags': tags
-    }
+    header = {'title': title, 'tags': tags}
     if extra_fields:
         header.update(sanitize_for_yaml(extra_fields))
 
     return f"---\n{yaml.safe_dump(header, sort_keys=False)}---\n"
 
 def clean_heading_ids(md_text):
-    return HEADING_ID_REGEX.sub(r'\1', md_text)
+    return re.compile(r'^(#{1,6} .+?)\s*\{\#.*?\}', re.MULTILINE).sub(r'\1', md_text)
 
-def extract_links_from_pandoc(md_text):
-    def replacer(match):
-        text = match.group(1).strip()
-        target = match.group(2).replace(' "wikilink"', '').strip()
 
-        if target.startswith(('http://', 'https://', 'mailto:')):
-            return match.group(0)
-
-        clean_target = display_title(target)
-        # Only include alias if it's actually different
-        if text == clean_target:
-            return f"[[{clean_target}]]"
+def fix_links_from_pandoc(md_text):
+    def replace_wikilinks_no_files(match: re.Match):
+        cleaned_filename = clean_filename(match.group(2).strip().replace('_', ' '))
+        text = match.group(3).strip()
+        if cleaned_filename == text:
+            return f'[[{cleaned_filename}]]'
         else:
-            return f"[[{clean_target}|{text}]]"
-    return PANDOC_LINK_REGEX.sub(replacer, md_text)
+            return f'[[{cleaned_filename}|{text}]]'
+
+    pandoc_wikilink_no_files_regex = re.compile(r'(?<!!)\[([^]]+)\]\(([^ ]+) "(.+?)"\)({[^}]+})?')
+    md_text_link_no_files_fixed = pandoc_wikilink_no_files_regex.sub(
+        replace_wikilinks_no_files, md_text
+    )
+
+    def replace_wikilink_inline_files(match: re.Match):
+        text = match.group(3).strip()
+        return f'![[{text}]]'
+
+    pandoc_wikilink_inline_files_regex = re.compile(r'\\*!\[([^]]+)\]\(([^ ]+) "(.+?)"\)({[^}]+})?')
+    md_text_link_files_fixed = pandoc_wikilink_inline_files_regex.sub(
+        replace_wikilink_inline_files, md_text_link_no_files_fixed
+    )
+    return md_text_link_files_fixed
+
 
 def clean_residual_wikilink_artifacts(md_text):
     return md_text.replace(' "wikilink"', '')
@@ -272,9 +256,8 @@ def fix_image_links(md):
 
 def cleanup_markdown(md):
     md = clean_heading_ids(md)
-    md = extract_links_from_pandoc(md)
+    md = fix_links_from_pandoc(md)
     md = clean_residual_wikilink_artifacts(md)
-    md = fix_wikilink_spacing(md)
     md = fix_image_links(md)
     return md
 
@@ -296,11 +279,23 @@ def convert_with_pandoc(text, title=""):
         return text
 
 def clean_and_convert_text(raw_text, title):
+    """Parse MediaWiki wikitext and prepare it for Pandoc conversion.
+
+    Extracts categories, images, and infobox data; builds an Obsidian YAML
+    front matter header; and records tags in the global tag index.
+
+    Note: Tags will become a file and a property, weird characters will break linking,
+    cleaning for good filenames with `clean_filename()`
+
+    Returns (yaml_header, cleaned_wikitext, tags).
+    """
     text = unescape(raw_text)
     wikicode = mwparserfromhell.parse(text)
     wikicode, tags = extract_categories(wikicode)
     wikicode = extract_images(wikicode)
     wikicode, infobox_data = extract_infobox(wikicode)
+
+    tags = [clean_filename(tag) for tag in tags]
 
     # Conditionally infer tag
     if infobox_data.get('infobox'):
@@ -315,6 +310,7 @@ def clean_and_convert_text(raw_text, title):
             tags.append(inferred_tag)
 
     cleaned_text = str(wikicode).strip()
+    title = clean_filename(title)
     yaml_header = extract_yaml_header(title, tags, infobox_data)
 
     # Track tags for index
@@ -376,14 +372,24 @@ def convert_pages(tree):
     logging.info("✅ Main articles converted")
 
 def create_tag_indexes():
+    """Write Obsidian index pages for each collected tag.
+
+    Uses the global tag_to_pages map populated during conversion(`clean_and_convert_text()`)
+    to emit one markdown file per tag under _indexes/, each with YAML front matter and
+    wikilinks to every page in that tag.
+
+    Note: Tags and page titles become filenames and wikilinks; weird characters
+    will break linking, so both are cleaned with `clean_filename()`.
+    """
     index_dir = os.path.join(OUTPUT_DIR, "_indexes")
     os.makedirs(index_dir, exist_ok=True)
     for tag, pages in tag_to_pages.items():
-        display_tag = display_title(tag)
+        tag = clean_filename(tag)
+        display_tag = tag
         yaml_header = extract_yaml_header(f"Index: {display_tag}", tag)
         lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages):
-            display_page = display_title(page)
+            display_page = clean_filename(page)
             lines.append(f"- [[{display_page}]]")
         content = yaml_header + "\n".join(lines)
         with open(os.path.join(index_dir, f"_{tag}.md"), "w", encoding="utf-8") as f:
