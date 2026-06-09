@@ -31,10 +31,12 @@ If you find this script useful, please consider supporting me on Patreon:
 
 ## 📦 Requirements
 
-- Python 3.8+ (already installed — see **Installation** below for the rest)
-- [Pandoc](https://pandoc.org/installing.html) CLI on your `PATH` — **optional but recommended** for proper Markdown and wikilink conversion (or pass `--skip-pandoc` to skip it)
+> **⚠️ Tested Pandoc version: 3.9.0.2**
+>
+> Pandoc integration (including wikilink post-processing) is tested against **Pandoc 3.9.0.2**. Other versions may work, but Pandoc's Markdown output can change between releases — if your version differs, conversion results may not match what was tested here.
 
-  Pandoc integration (including wikilink post-processing) has been tested with **Pandoc 3.9.0.2**. Other versions may work, but Pandoc's Markdown output can change between releases.
+- Python 3.8+ (already installed — see **Installation** below for the rest)
+- [Pandoc](https://pandoc.org/installing.html) CLI on your `PATH` — **optional but recommended** for proper Markdown and wikilink conversion (or pass `--skip-pandoc` to skip it). Install **3.9.0.2** when possible (see callout above).
 
 Python dependencies are listed in `requirements.txt`. All packages use pinned versions (`~=`) for compatibility across environments. You are free to remove the version constraints and try the latest (or older) releases if you prefer — just keep in mind that unpinned installs may introduce breaking changes.
 
@@ -52,7 +54,11 @@ These steps assume **Python 3.8+ is already installed**. Clone or download this 
 
 ### 1. Install the Pandoc CLI (optional but recommended)
 
-`convert.py` uses Pandoc when available for wikitext-to-Markdown conversion and wikilink cleanup. Without it, the script still runs but leaves raw wikitext in place. You can also pass `--skip-pandoc` at runtime to bypass conversion even when Pandoc is installed. Install the CLI once for your operating system:
+`convert.py` uses Pandoc when available for wikitext-to-Markdown conversion and wikilink cleanup. Without it, the script still runs but leaves raw wikitext in place. You can also pass `--skip-pandoc` at runtime to bypass conversion even when Pandoc is installed.
+
+**Use Pandoc 3.9.0.2** — the version this project is tested against (see **Requirements**). Package managers often ship older releases; download the matching build from the [Pandoc install page](https://pandoc.org/installing.html) if needed.
+
+Install the CLI once for your operating system:
 
 > **Using Conda?** You can install Pandoc with `conda install -c conda-forge pandoc` inside your environment — see **Option B — Conda** below and skip this step.
 
@@ -221,10 +227,11 @@ With your environment activated:
 python convert.py --help
 ```
 
-You should see the script's help text. If you installed Pandoc, also check:
+You should see the script's help text. If you installed Pandoc, confirm the version matches **3.9.0.2** (the tested version):
 
 ```bash
 pandoc --version
+# Expected first line: pandoc 3.9.0.2
 ```
 
 ---
