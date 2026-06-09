@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from html import unescape
@@ -46,6 +47,13 @@ OUTPUT_DIR = args.output_dir
 SKIP_REDIRECTS = args.skip_redirects
 SKIP_PANDOC = args.skip_pandoc
 COOKIES = args.cookies
+PANDOC_AVAILABLE = shutil.which("pandoc") is not None
+
+if not SKIP_PANDOC and not PANDOC_AVAILABLE:
+    logging.warning(
+        "⚠️ Pandoc not found on PATH. Wikitext will be kept as-is. "
+        "Install Pandoc (https://pandoc.org/installing.html) or pass --skip-pandoc."
+    )
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -281,6 +289,10 @@ def convert_with_pandoc(text, title=""):
         logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
         logging.debug(e.stderr.decode())
         return text
+    except OSError as e:
+        logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
+        logging.debug(e)
+        return text
 
 def clean_and_convert_text(raw_text, title):
     """Parse MediaWiki wikitext and prepare it for Pandoc conversion.
@@ -358,7 +370,7 @@ def convert_pages(tree):
 
             raw_text = text_elem.text
             yaml_str, wikitext, tags = clean_and_convert_text(raw_text, title)
-            if not SKIP_PANDOC:
+            if not SKIP_PANDOC and PANDOC_AVAILABLE:
                 wikitext = convert_with_pandoc(wikitext, title)
                 wikitext = cleanup_markdown(wikitext)
             markdown = f"{yaml_str}\n{wikitext.strip()}\n"
