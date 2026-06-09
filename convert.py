@@ -56,17 +56,17 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 tag_to_pages = defaultdict(list)
 filename_counts = defaultdict(int)
 
-WIKI_DOMAIN = None
+WIKI_URL = None
 
-def extract_wiki_domain(tree):
-    global WIKI_DOMAIN
+
+def extract_wiki_url(tree):
+    global WIKI_URL
     ns = {"ns": NS}
     base_elem = tree.find(".//ns:siteinfo/ns:base", ns)
     if base_elem is not None and base_elem.text:
         base_url = base_elem.text.strip()
-        match = re.match(r"https?://([^/]+)/", base_url)
-        if match:
-            WIKI_DOMAIN = match.group(1)
+        WIKI_URL = re.match(r"(https?://[^/]+)/", base_url).group(1)
+        if WIKI_URL:
             return
     raise ValueError("Could not extract wiki domain from <base> tag.")
 
@@ -122,14 +122,15 @@ def extract_images(wikicode):
                     images.add(embed_link)
     return wikicode
 
-def get_image_url(wiki_domain, filename):
-    url = f"https://{wiki_domain}/api.php"
+
+def get_image_url(filename):
+    url = f"{WIKI_URL}/api.php"
     params = {
         "action": "query",
         "format": "json",
         "prop": "imageinfo",
         "titles": filename,
-        "iiprop": "url"
+        "iiprop": "url",
     }
     try:
         resp = requests.get(url, params=params, timeout=10)
@@ -153,7 +154,7 @@ def download_image(image_name):
         logging.debug(f"🖼️ Skipping download (already exists): {safe_name}")
         return safe_name
 
-    url = get_image_url(WIKI_DOMAIN, f"File:{image_name}")
+    url = get_image_url(f"File:{image_name}")
     if not url:
         logging.warning(f"❌ Could not find URL for image: {image_name}")
         return None
@@ -398,7 +399,7 @@ def main():
         return
 
     try:
-        extract_wiki_domain(tree)
+        extract_wiki_url(tree)
     except ValueError as e:
         logging.error(f"❌ {e}")
         return
