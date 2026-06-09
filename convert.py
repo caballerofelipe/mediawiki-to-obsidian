@@ -21,25 +21,33 @@ p = inflect.engine()
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 IMAGE_DIR = "images"
 
+
 def TAG(t):
     return f"{{{NS}}}{t}"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Convert MediaWiki XML to Obsidian Vault")
     parser.add_argument("input_xml", help="Input XML file")
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
-    parser.add_argument("--skip-pandoc", action="store_true", help="Skip Pandoc conversion even if available")
+    parser.add_argument(
+        "--skip-pandoc", action="store_true", help="Skip Pandoc conversion even if available"
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--cookies", help="Cookie header value for API/image requests (e.g. 'name=value; other=value')")
+    parser.add_argument(
+        "--cookies",
+        help="Cookie header value for API/image requests (e.g. 'name=value; other=value')",
+    )
     return parser.parse_args()
+
 
 args = parse_args()
 
 logging.basicConfig(
     level=logging.DEBUG if args.verbose else logging.INFO,
     format='%(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 
 INPUT_XML = args.input_xml
@@ -74,22 +82,26 @@ def extract_wiki_url(tree):
             return
     raise ValueError("Could not extract wiki domain from <base> tag.")
 
+
 def clean_filename(title):
     """Convert to safe filename with underscores"""
     return re.compile(r'[\\/*?:"<>|{}]').sub('_', title.strip())
 
+
 def normalize_tag(tag):
     return tag.replace(" ", "_").lower()
+
 
 def extract_categories(wikicode):
     categories = []
     for link in wikicode.ifilter_wikilinks():
         target = link.title.strip()
         if target.lower().startswith("category:"):
-            cat = target[len("category:"):].strip()
+            cat = target[len("category:") :].strip()
             categories.append(normalize_tag(cat))
             wikicode.remove(link)
     return wikicode, categories
+
 
 def extract_images(wikicode):
     images = set()
@@ -122,7 +134,9 @@ def get_image_url(filename):
         "iiprop": "url",
     }
     try:
-        resp = requests.get(url, params=params, timeout=10, headers={"Cookie": COOKIES} if COOKIES else None)
+        resp = requests.get(
+            url, params=params, timeout=10, headers={"Cookie": COOKIES} if COOKIES else None
+        )
         data = resp.json()
         pages = data.get("query", {}).get("pages", {})
         for page in pages.values():
@@ -132,6 +146,7 @@ def get_image_url(filename):
     except Exception as e:
         logging.error(f"❌ Failed to get image URL for {filename}: {e}")
     return None
+
 
 def download_image(image_name):
     if not image_name:
@@ -164,6 +179,7 @@ def download_image(image_name):
         logging.error(f"❌ Error downloading {image_name}: {e}")
         return None
 
+
 def extract_infobox(wikicode):
     infobox_data = {}
     infobox_template = None
@@ -178,7 +194,7 @@ def extract_infobox(wikicode):
 
     raw_name = infobox_template.name.strip().lower()
     if raw_name.startswith("infobox_"):
-        infobox_type = raw_name[len("infobox_"):].replace(' ', '_').title()
+        infobox_type = raw_name[len("infobox_") :].replace(' ', '_').title()
     else:
         infobox_type = infobox_template.name
 
@@ -214,6 +230,7 @@ def extract_infobox(wikicode):
 
     return wikicode, infobox_data
 
+
 def sanitize_for_yaml(obj):
     if isinstance(obj, dict):
         return {sanitize_for_yaml(k): sanitize_for_yaml(v) for k, v in obj.items()}
@@ -224,12 +241,14 @@ def sanitize_for_yaml(obj):
     else:
         return str(obj)
 
+
 def extract_yaml_header(title, tags, extra_fields=None):
     header = {'title': title, 'tags': tags}
     if extra_fields:
         header.update(sanitize_for_yaml(extra_fields))
 
     return f"---\n{yaml.safe_dump(header, sort_keys=False)}---\n"
+
 
 def clean_heading_ids(md_text):
     return re.compile(r'^(#{1,6} .+?)\s*\{\#.*?\}', re.MULTILINE).sub(r'\1', md_text)
@@ -263,8 +282,10 @@ def fix_links_from_pandoc(md_text):
 def clean_residual_wikilink_artifacts(md_text):
     return md_text.replace(' "wikilink"', '')
 
+
 def fix_image_links(md):
     return re.sub(r'\\(!\[\[)', r'\1', md)
+
 
 def cleanup_markdown(md):
     md = clean_heading_ids(md)
@@ -273,6 +294,7 @@ def cleanup_markdown(md):
     md = fix_image_links(md)
     return md
 
+
 def convert_with_pandoc(text, title=""):
     try:
         result = subprocess.run(
@@ -280,7 +302,7 @@ def convert_with_pandoc(text, title=""):
             input=text.encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            check=True
+            check=True,
         )
         md = result.stdout.decode("utf-8")
         md = md.replace("\\'", "'")
@@ -293,6 +315,7 @@ def convert_with_pandoc(text, title=""):
         logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
         logging.debug(e)
         return text
+
 
 def clean_and_convert_text(raw_text, title):
     """Parse MediaWiki wikitext and prepare it for Pandoc conversion.
@@ -334,6 +357,7 @@ def clean_and_convert_text(raw_text, title):
         tag_to_pages[tag].append(title)
 
     return yaml_header, cleaned_text, tags
+
 
 def convert_pages(tree):
     ns = {"ns": NS}
@@ -388,6 +412,7 @@ def convert_pages(tree):
 
     logging.info("✅ Main articles converted")
 
+
 def create_tag_indexes():
     """Write Obsidian index pages for each collected tag.
 
@@ -413,6 +438,7 @@ def create_tag_indexes():
             f.write(content)
     logging.info("📚 Index pages created under _indexes/ with tag references")
 
+
 def main():
     logging.info("🔄 Converting MediaWiki XML to Obsidian Vault...")
     try:
@@ -430,6 +456,7 @@ def main():
     convert_pages(tree)
     create_tag_indexes()
     logging.info(f"✅ All done! Markdown vault ready at: {OUTPUT_DIR}")
+
 
 if __name__ == "__main__":
     main()
