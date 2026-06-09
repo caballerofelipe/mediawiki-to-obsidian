@@ -34,6 +34,8 @@ If you find this script useful, please consider supporting me on Patreon:
 - Python 3.8+ (already installed — see **Installation** below for the rest)
 - [Pandoc](https://pandoc.org/installing.html) CLI on your `PATH` — **optional but recommended** for proper Markdown and wikilink conversion (or pass `--skip-pandoc` to skip it)
 
+  Pandoc integration (including wikilink post-processing) has been tested with **Pandoc 3.9.0.2**. Other versions may work, but Pandoc's Markdown output can change between releases.
+
 Python dependencies are listed in `requirements.txt`. All packages use pinned versions (`~=`) for compatibility across environments. You are free to remove the version constraints and try the latest (or older) releases if you prefer — just keep in mind that unpinned installs may introduce breaking changes.
 
 | Package            | Purpose                                |
