@@ -57,3 +57,6 @@ dmypy.json
 # IDE
 .idea/
 .vscode/
+
+do_not_commit/
+

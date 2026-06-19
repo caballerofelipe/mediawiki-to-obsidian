@@ -71,25 +71,31 @@ def test_extract_wiki_url_reads_generator() -> None:
   <siteinfo>
     <base>https://en.wikipedia.org/wiki/Main_Page</base>
     <generator>MediaWiki 1.41.0</generator>
+    <sitename>Wikipedia</sitename>
   </siteinfo>
 </mediawiki>"""
     tree = ET.ElementTree(ET.fromstring(xml))
-    wiki_url, base_url, generator = convert.extract_wiki_url(tree)
+    wiki_url, base_url, generator, sitename = convert.extract_wiki_url(tree)
     assert wiki_url == "https://en.wikipedia.org"
     assert base_url == "https://en.wikipedia.org/wiki/Main_Page"
     assert generator == "MediaWiki 1.41.0"
+    assert sitename == "Wikipedia"
 
 
 def test_build_yaml_header_with_source() -> None:
     convert.WIKI_URL = "https://example.com"
     convert.WIKI_BASE_URL = "https://example.com/wiki/Main_Page"
     convert.WIKI_GENERATOR = "MediaWiki 1.41.0"
+    convert.WIKI_NAME = "Example Wiki"
     yaml = build_yaml_header(
         "Sample Page",
         ["tag"],
         extra_fields=build_source_fields("Sample Page", "2024-06-18T10:30:00Z"),
     )
-    assert "source/note: Imported from MediaWiki 1.41.0 website @ https://example.com" in yaml
+    assert (
+        "source/note: Imported from Example Wiki (MediaWiki 1.41.0) @ https://example.com"
+        in yaml
+    )
     assert "source/url: https://example.com/wiki/Sample_Page" in yaml
     assert "source/date: '2024-06-18T10:30:00Z'" in yaml
 

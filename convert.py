@@ -81,10 +81,11 @@ filename_counts: DefaultDict[str, int] = defaultdict(int)
 WIKI_URL: Optional[str] = None
 WIKI_BASE_URL: Optional[str] = None
 WIKI_GENERATOR: Optional[str] = None
+WIKI_NAME: Optional[str] = None
 
 
-def extract_wiki_url(tree: ET.ElementTree) -> Tuple[str, str, str]:
-    """Extract wiki host URL, full base page URL, and generator from a MediaWiki XML export."""
+def extract_wiki_url(tree: ET.ElementTree) -> Tuple[str, str, str, str]:
+    """Extract wiki host URL, base page URL, generator, and site name from a MediaWiki XML export."""
     ns = {"ns": NS}
     siteinfo = tree.find(".//ns:siteinfo", ns)
     if siteinfo is None:
@@ -95,12 +96,19 @@ def extract_wiki_url(tree: ET.ElementTree) -> Tuple[str, str, str]:
     if generator_elem is not None and generator_elem.text:
         generator = generator_elem.text.strip()
 
+    sitename_elem = siteinfo.find("ns:sitename", ns)
+    sitename = ""
+    if sitename_elem is not None and sitename_elem.text:
+        sitename = sitename_elem.text.strip()
+
     base_elem = siteinfo.find("ns:base", ns)
     if base_elem is not None and base_elem.text:
         base_url = base_elem.text.strip()
+        if not sitename:
+            sitename = urlparse(base_url).netloc
         match = re.match(r"(https?://[^/]+)/", base_url)
         if match:
-            return match.group(1), base_url, generator
+            return match.group(1), base_url, generator, sitename
     raise ValueError("Could not extract wiki domain from <base> tag.")
 
 
@@ -137,7 +145,7 @@ def build_mediawiki_page_url(page_title: str) -> str:
 def build_source_fields(page_title: str, revision_date: Optional[str] = None) -> Dict[str, Any]:
     """Build YAML front matter fields describing the original MediaWiki source."""
     fields = {
-        "source/note": f"Imported from {WIKI_GENERATOR} website @ {WIKI_URL}",
+        "source/note": f"Imported from {WIKI_NAME} ({WIKI_GENERATOR}) @ {WIKI_URL}",
         "source/url": build_mediawiki_page_url(page_title),
     }
     if revision_date:
@@ -599,8 +607,8 @@ def main() -> None:
         return
 
     try:
-        global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR
-        WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR = extract_wiki_url(tree)
+        global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME
+        WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME = extract_wiki_url(tree)
     except ValueError as e:
         logging.error(f"‼️ {e}")
         return
