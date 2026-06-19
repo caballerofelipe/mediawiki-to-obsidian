@@ -202,37 +202,37 @@ def download_image(image_name: str) -> Optional[str]:
         return None
 
 
-def infobox_to_dict(template: Template) -> Dict[str, Any]:
-    """Parse an infobox MediaWiki template into a flat dictionary."""
-    infobox_data: Dict[str, Any] = {}
+def template_to_dict(template: Template) -> Dict[str, Any]:
+    """Parse a MediaWiki template invocation into a flat dictionary."""
+    template_data: Dict[str, Any] = {}
 
     raw_name = template.name.strip().lower()
     if raw_name.startswith("infobox_"):
-        infobox_type = raw_name[len("infobox_") :].replace(' ', '_')  # .title()
+        callout_type = raw_name[len("infobox_") :].replace(' ', '_')  # .title()
     else:
-        infobox_type = template.name
+        callout_type = template.name
 
-    infobox_data['infobox'] = infobox_type
+    template_data['callout_type'] = callout_type
 
     for param in template.params:
         key = param.name.strip().replace(":", "").lower()
         val = param.value.strip()
-        infobox_data[key] = val
+        template_data[key] = val
 
-    return infobox_data
+    return template_data
 
 
-def infobox_dict_to_callout(infobox_data: Dict[str, Any]) -> str:
-    """Format an infobox dictionary as an Obsidian callout block."""
+def template_dict_to_callout(template_data: Dict[str, Any]) -> str:
+    """Format a template dictionary as an Obsidian callout block."""
     callout_info = {
-        data: str(infobox_data[data]).replace('\n', '')
-        for data in infobox_data
-        if data not in ('infobox', 'image')  # These are treated differently
+        data: str(template_data[data]).replace('\n', '')
+        for data in template_data
+        if data not in ('callout_type', 'image')  # These are treated differently
     }
 
     callout = ''
-    callout += f'\n> [!{infobox_data['infobox']}]' if infobox_data['infobox'] else '\n> [!NOTE]'
-    if image_name := infobox_data.get('image'):
+    callout += f'\n> [!{template_data['callout_type']}]' if template_data['callout_type'] else '\n> [!NOTE]'
+    if image_name := template_data.get('image'):
         image_name = image_name.strip()
         download_image(image_name)
         callout += f'\n> - **image**: ![[{IMAGE_DIR}/{image_name}]]'
@@ -243,7 +243,7 @@ def infobox_dict_to_callout(infobox_data: Dict[str, Any]) -> str:
     return callout
 
 
-def transform_infobox_to_callout(wikicode: Wikicode) -> Wikicode:
+def transform_templates_to_callouts(wikicode: Wikicode) -> Wikicode:
     """Replace all templates in wikitext with Obsidian callout equivalents."""
     wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     if len(wikicode.filter_templates()) == 0:
@@ -251,8 +251,8 @@ def transform_infobox_to_callout(wikicode: Wikicode) -> Wikicode:
 
     while template_list := wikicode.filter_templates():
         template = template_list[0]
-        infobox_dict = infobox_to_dict(template)
-        callout = infobox_dict_to_callout(infobox_dict)
+        template_dict = template_to_dict(template)
+        callout = template_dict_to_callout(template_dict)
 
         use_pandoc = not PANDOC_SKIP and PANDOC_AVAILABLE
         callout_to_insert = '\n'
@@ -338,7 +338,7 @@ def remove_obsidian_callout_block(md_text: str) -> str:
     Removes code blocks with language 'obsidian-callout-block' from the markdown text.
 
     This function removes code blocks created as <source lang="obsidian-callout-block">
-    in the transform_infobox_to_callout function. The cleanup is only needed—and only
+    in the transform_templates_to_callouts function. The cleanup is only needed—and only
     takes place—when Pandoc is used, because Pandoc preserves these fenced code blocks.
 
     Args:
@@ -392,7 +392,7 @@ def convert_with_pandoc(text: str, title: str = "") -> str:
 def prepare_wikitext(raw_text: str, title: str) -> Tuple[str, str, List[str]]:
     """Parse MediaWiki wikitext and prepare it for Pandoc conversion.
 
-    Processes categories and images, transforms infoboxes, builds an Obsidian YAML
+    Processes categories and images, transforms templates to callouts, builds an Obsidian YAML
     front matter header, and records tags in the global tag index.
 
     Note: Tags will become a file and a property, weird characters will break linking,
@@ -405,7 +405,7 @@ def prepare_wikitext(raw_text: str, title: str) -> Tuple[str, str, List[str]]:
     wikicode, tags = process_categories(wikicode)
     wikicode = embed_images(wikicode)
 
-    wikicode = transform_infobox_to_callout(wikicode)
+    wikicode = transform_templates_to_callouts(wikicode)
 
     cleaned_text = str(wikicode).strip()
     title = clean_filename(title)
@@ -474,7 +474,7 @@ def convert_pages(tree: ET.ElementTree) -> None:
             if title.startswith('Template:'):
                 # Add the original source to the file if it's a Template
                 # Used for reference because the template will be changed completely
-                # Because parts are treated like infoboxes
+                # Because template invocations are converted to callouts in article wikitext
                 raw_text += wrap_original_mediawiki_source(text_elem.text)
             raw_text += text_elem.text
             yaml_str, wikitext, tags = prepare_wikitext(raw_text, title)

@@ -311,7 +311,7 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--pandoc-skip] [--p
 
 ### Skipping Pandoc (`--pandoc-skip`)
 
-Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, infobox callouts, images, and YAML frontmatter (title and tags) are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
+Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, template callouts, images, and YAML frontmatter (title and tags) are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
 
 ```bash
 python convert.py wiki-dump.xml --pandoc-skip

@@ -9,7 +9,7 @@ from convert import (
     clean_heading_ids,
     fix_links_from_pandoc,
     build_yaml_header,
-    transform_infobox_to_callout,
+    transform_templates_to_callouts,
 )
 
 
@@ -44,8 +44,8 @@ def test_build_yaml_header_basic() -> None:
     assert "- tag_two" in yaml
 
 
-# Test 4: Infobox parsing and tag inference
-def test_transform_infobox_to_callout(monkeypatch) -> None:
+# Test 4: Template parsing and callout conversion
+def test_transform_templates_to_callouts(monkeypatch) -> None:
     monkeypatch.setattr(convert, "PANDOC_SKIP", True)
     wikitext = """{{Infobox_character
 | name = Aragorn
@@ -66,6 +66,6 @@ def test_transform_infobox_to_callout(monkeypatch) -> None:
 [[Category:Characters]]"""
 
     wikicode = mwparserfromhell.parse(wikitext)
-    cleaned_wikicode = transform_infobox_to_callout(wikicode)
+    cleaned_wikicode = transform_templates_to_callouts(wikicode)
 
     assert str(cleaned_wikicode) == wikitext_with_callout
