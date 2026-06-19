@@ -35,7 +35,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
     parser.add_argument(
-        "--skip-pandoc", action="store_true", help="Skip Pandoc conversion even if available"
+        "--pandoc-skip", action="store_true", help="Skip Pandoc conversion even if available"
+    )
+    parser.add_argument(
+        "--pandoc-plain-markdown",
+        action="store_true",
+        help="Use Pandoc --to=markdown instead of the default --to=markdown-raw_attribute",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument(
@@ -56,14 +61,15 @@ logging.basicConfig(
 INPUT_XML: str = args.input_xml
 OUTPUT_DIR: str = args.output_dir
 SKIP_REDIRECTS: bool = args.skip_redirects
-SKIP_PANDOC: bool = args.skip_pandoc
+PANDOC_SKIP: bool = args.pandoc_skip
+PANDOC_TO_FORMAT: str = "markdown" if args.pandoc_plain_markdown else "markdown-raw_attribute"
 COOKIES: Optional[str] = args.cookies
 PANDOC_AVAILABLE: bool = shutil.which("pandoc") is not None
 
-if not SKIP_PANDOC and not PANDOC_AVAILABLE:
+if not PANDOC_SKIP and not PANDOC_AVAILABLE:
     logging.warning(
         "⚠️ Pandoc not found on PATH. Wikitext will be kept as-is. "
-        "Install Pandoc (https://pandoc.org/installing.html) or pass --skip-pandoc."
+        "Install Pandoc (https://pandoc.org/installing.html) or pass --pandoc-skip."
     )
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -248,7 +254,7 @@ def transform_infobox_to_callout(wikicode: Wikicode) -> Wikicode:
         infobox_dict = infobox_to_dict(template)
         callout = infobox_dict_to_callout(infobox_dict)
 
-        use_pandoc = not SKIP_PANDOC and PANDOC_AVAILABLE
+        use_pandoc = not PANDOC_SKIP and PANDOC_AVAILABLE
         callout_to_insert = '\n'
         if use_pandoc:
             callout_to_insert += '\n<source lang="obsidian-callout-block">'
@@ -364,7 +370,7 @@ def convert_with_pandoc(text: str, title: str = "") -> str:
     """Convert wikitext to markdown via Pandoc, falling back to raw text on failure."""
     try:
         result = subprocess.run(
-            ['pandoc', '--from=mediawiki', '--to=markdown-raw_attribute', '--wrap=none'],
+            ['pandoc', '--from=mediawiki', f'--to={PANDOC_TO_FORMAT}', '--wrap=none'],
             input=text.encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -473,7 +479,7 @@ def convert_pages(tree: ET.ElementTree) -> None:
             raw_text += text_elem.text
             yaml_str, wikitext, tags = prepare_wikitext(raw_text, title)
 
-            if not SKIP_PANDOC and PANDOC_AVAILABLE:
+            if not PANDOC_SKIP and PANDOC_AVAILABLE:
                 wikitext = convert_with_pandoc(wikitext, title)
                 wikitext = cleanup_markdown(wikitext)
             markdown = f"{yaml_str}\n{wikitext.strip()}\n"

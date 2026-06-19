@@ -1,36 +1,8 @@
-# # contents of test_module.py with source code and the test
-# from pathlib import Path
-
-
-# def getssh():
-#     """Simple function to return expanded homedir ssh path."""
-#     print(Path.home())
-#     return Path.home() / ".ssh"
-
-
-# def test_getssh(monkeypatch):
-#     # mocked return function to replace Path.home
-#     # always return '/abc'
-#     def mockreturn():
-#         return Path("/abc")
-
-#     # Application of the monkeypatch to replace Path.home
-#     # with the behavior of mockreturn defined above.
-#     monkeypatch.setattr(Path, "home", lambda: '/abcX')
-
-#     # Calling getssh() will use mockreturn in place of Path.home
-#     # for this test with the monkeypatch.
-#     x = getssh()
-#     assert x == Path("/abc/.ssh")
-
-
 """Unit tests for convert.py.
 
 Pandoc link post-processing tests reflect output from Pandoc 3.9.0.2.
 """
 
-from multiprocessing import context
-import pytest
 import mwparserfromhell
 import convert
 from convert import (
@@ -72,22 +44,9 @@ def test_build_yaml_header_basic() -> None:
     assert "- tag_two" in yaml
 
 
-# def test_with_monkeypatch(monkeypatch):
-#     monkeypatch.setattr('sys.argv', ['prog', '--input', 'file.txt', '--verbose'])
-#     args = parse_args()
-#     assert args.input == 'file.txt'
-#     assert args.verbose is True
-
-
 # Test 4: Infobox parsing and tag inference
 def test_transform_infobox_to_callout(monkeypatch) -> None:
-    # Forcing pandoc skipping
-    monkeypatch.setattr(convert, 'SKIP_PANDOC', True)
-    # print(convert.SKIP_PANDOC)
-    # if convert.SKIP_PANDOC:
-    #     print('skipping')
-    # else:
-    #     print('no skipping')
+    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
     wikitext = """{{Infobox_character
 | name = Aragorn
 | race = [[Human]]
@@ -109,8 +68,4 @@ def test_transform_infobox_to_callout(monkeypatch) -> None:
     wikicode = mwparserfromhell.parse(wikitext)
     cleaned_wikicode = transform_infobox_to_callout(wikicode)
 
-    print(f'> wikicode: <<{wikicode}>>')
-    print(f'> cleaned_wikicode: <<{cleaned_wikicode}>>')
-    print(f'> wikitext_with_callout: <<{wikitext_with_callout}>>')
-
-    assert wikitext_with_callout == cleaned_wikicode
+    assert str(cleaned_wikicode) == wikitext_with_callout

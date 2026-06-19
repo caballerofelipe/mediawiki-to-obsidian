@@ -16,7 +16,8 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - 🔗 Converts internal links to Obsidian-safe `[[Wikilinks]]` via Pandoc post-processing
 - 📚 Automatically generates tag-based index files under `indexes/` (e.g. `Index Characters.md`)
 - 🐢 Uses Pandoc for wikitext-to-Markdown conversion when available (recommended; falls back to raw wikitext on failure)
-- ⏭️ Optional `--skip-pandoc` flag to bypass Pandoc conversion entirely and keep raw wikitext
+- ⏭️ Optional `--pandoc-skip` flag to bypass Pandoc conversion entirely and keep raw wikitext
+- 📝 Optional `--pandoc-plain-markdown` flag to preserve raw HTML via Pandoc's `raw_attribute` writer (see below)
 - 🔐 Optional `--cookies` flag for authenticated wikis (private wikis, login-required image downloads)
 - 🔍 Verbose mode for detailed output and easier troubleshooting
 
@@ -36,7 +37,7 @@ If you find this script useful, please consider supporting me on Patreon:
 > Pandoc integration (including wikilink post-processing) is tested against **Pandoc 3.9.0.2**. Other versions may work, but Pandoc's Markdown output can change between releases — if your version differs, conversion results may not match what was tested here.
 
 - Python 3.8+ (already installed — see **Installation** below for the rest)
-- [Pandoc](https://pandoc.org/installing.html) CLI on your `PATH` — **optional but recommended** for proper Markdown and wikilink conversion (or pass `--skip-pandoc` to skip it). Install **3.9.0.2** when possible (see callout above).
+- [Pandoc](https://pandoc.org/installing.html) CLI on your `PATH` — **optional but recommended** for proper Markdown and wikilink conversion (or pass `--pandoc-skip` to skip it). Install **3.9.0.2** when possible (see callout above).
 
 Python dependencies are listed in `requirements.txt`. All packages use pinned versions (`~=`) for compatibility across environments. You are free to remove the version constraints and try the latest (or older) releases if you prefer — just keep in mind that unpinned installs may introduce breaking changes.
 
@@ -53,7 +54,7 @@ These steps assume **Python 3.8+ is already installed**. Clone or download this 
 
 ### 1. Install the Pandoc CLI (optional but recommended)
 
-`convert.py` uses Pandoc when available for wikitext-to-Markdown conversion and wikilink cleanup. Without it, the script still runs but leaves raw wikitext in place. You can also pass `--skip-pandoc` at runtime to bypass conversion even when Pandoc is installed.
+`convert.py` uses Pandoc when available for wikitext-to-Markdown conversion and wikilink cleanup. Without it, the script still runs but leaves raw wikitext in place. You can also pass `--pandoc-skip` at runtime to bypass conversion even when Pandoc is installed.
 
 **Use Pandoc 3.9.0.2** — the version this project is tested against (see **Requirements**). Package managers often ship older releases; download the matching build from the [Pandoc install page](https://pandoc.org/installing.html) if needed.
 
@@ -295,25 +296,50 @@ See [Help:Export](https://www.mediawiki.org/wiki/Help:Export) and [Parameters to
 ## 🚀 Usage
 
 ```bash
-python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--skip-pandoc] [--verbose] [--cookies COOKIES]
+python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--pandoc-skip] [--pandoc-plain-markdown] [--verbose] [--cookies COOKIES]
 ```
 
-| Argument           | Description                                                                 |
-| ------------------ | --------------------------------------------------------------------------- |
-| `INPUT_XML`        | Path to your MediaWiki XML dump                                             |
-| `OUTPUT_DIR`       | Optional output folder (default: `obsidian_vault/`)                          |
-| `--skip-redirects` | Ignore redirect pages                                                       |
-| `--skip-pandoc`    | Skip Pandoc conversion and wikilink cleanup, even if Pandoc is installed     |
-| `--verbose`        | Enable verbose logging (disables progress bar)                              |
-| `--cookies`        | Cookie header for authenticated API/image requests (see below)              |
+| Argument                  | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `INPUT_XML`               | Path to your MediaWiki XML dump                                             |
+| `OUTPUT_DIR`              | Optional output folder (default: `obsidian_vault/`)                          |
+| `--skip-redirects`        | Ignore redirect pages                                                       |
+| `--pandoc-skip`           | Skip Pandoc conversion and wikilink cleanup, even if Pandoc is installed     |
+| `--pandoc-plain-markdown` | Use Pandoc `--to=markdown` instead of the default `--to=markdown-raw_attribute` |
+| `--verbose`               | Enable verbose logging (disables progress bar)                              |
+| `--cookies`               | Cookie header for authenticated API/image requests (see below)              |
 
-### Skipping Pandoc (`--skip-pandoc`)
+### Skipping Pandoc (`--pandoc-skip`)
 
 Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, infobox callouts, images, and YAML frontmatter (title and tags) are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
 
 ```bash
-python convert.py wiki-dump.xml --skip-pandoc
+python convert.py wiki-dump.xml --pandoc-skip
 ```
+
+### Pandoc output format (`--pandoc-plain-markdown`)
+
+By default, the script calls Pandoc with `--to=markdown-raw_attribute`. In Pandoc's format syntax, the `-raw_attribute` suffix **disables** the [`raw_attribute` extension](https://pandoc.org/MANUAL.html#extension-raw_attribute) on the Markdown writer. That produces cleaner output for most Obsidian vaults — wikilinks, headings, and standard Markdown structures convert normally, and you avoid `{=html}` fenced code blocks in your notes.
+
+However, disabling `raw_attribute` can drop or reshape HTML that MediaWiki pages often rely on. Pandoc only has limited native Markdown syntax for complex markup (styled tables, nested `<div>`/`<span>` wrappers, figures with captions, inline HTML with attributes, etc.). When `raw_attribute` is off, Pandoc tends to:
+
+- **Convert** HTML it understands into Markdown or Pandoc fenced divs (`::: {.class}`), which can strip classes, inline styles, and other attributes ([discussion #9318](https://github.com/jgm/pandoc/discussions/9318))
+- **Emit bare HTML** only where the [`raw_html`](https://pandoc.org/MANUAL.html#extension-raw_html) extension still allows it, rather than wrapping content in explicit `{=html}` passthrough blocks
+- **Lose content** that has no Markdown equivalent and cannot be represented as plain HTML — for example, HTML comments and some block structures disappear when both `raw_attribute` and `raw_html` are disabled ([discussion #9324](https://github.com/jgm/pandoc/discussions/9324))
+
+Since Pandoc 3.2, the Markdown writer also prefers bare HTML over `{=html}` raw-attribute syntax when `raw_html` is enabled, because the two forms are equivalent in Pandoc's internal representation ([issue #10213](https://github.com/jgm/pandoc/issues/10213)). That makes round-tripping through Pandoc again less predictable, but it does not change the core trade-off: **without `raw_attribute`, you get tidier Markdown at the cost of less faithful HTML preservation.**
+
+Pass `--pandoc-plain-markdown` to use `--to=markdown` instead (with `raw_attribute` enabled). Pandoc will then wrap unrepresentable HTML in explicit `{=html}` fenced blocks and inline spans, preserving the original markup for manual cleanup or downstream tools that understand Pandoc's raw-attribute syntax. This is useful when your wiki dump contains heavy HTML formatting, custom templates rendered as HTML, or structures you need to keep intact even if Obsidian will not render them perfectly out of the box.
+
+```bash
+# Default — cleaner Markdown, may simplify or remove some HTML
+python convert.py wiki-dump.xml
+
+# Preserve raw HTML in Pandoc {=html} blocks
+python convert.py wiki-dump.xml --pandoc-plain-markdown
+```
+
+> **Tip:** If converted pages look fine in Obsidian, stick with the default. If you notice missing tables, stripped inline styles, or lost template HTML, try `--pandoc-plain-markdown` and review the output — you may need to clean up `{=html}` blocks manually afterward.
 
 ### Authenticated wikis (`--cookies`)
 
