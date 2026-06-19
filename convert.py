@@ -27,10 +27,12 @@ IMAGE_DIR = "images"
 
 
 def TAG(t: str) -> str:
+    """Return the MediaWiki XML namespace-qualified tag name for element ``t``."""
     return f"{{{NS}}}{t}"
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse and return command-line arguments for the converter."""
     parser = argparse.ArgumentParser(description="Convert MediaWiki XML to Obsidian Vault")
     parser.add_argument("input_xml", help="Input XML file")
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
@@ -76,6 +78,7 @@ WIKI_URL: Optional[str] = None
 
 
 def extract_wiki_url(tree: ET.ElementTree) -> str:
+    """Extract the wiki base URL (scheme + host) from a MediaWiki XML export."""
     ns = {"ns": NS}
     base_elem = tree.find(".//ns:siteinfo/ns:base", ns)
     if base_elem is not None and base_elem.text:
@@ -87,15 +90,20 @@ def extract_wiki_url(tree: ET.ElementTree) -> str:
 
 
 def clean_filename(title: str) -> str:
-    """Convert to safe filename with underscores"""
+    """Convert a page title to a safe filename by replacing forbidden characters to underscores."""
     return re.compile(r'[\\/*?:"<>|{}]').sub('_', title.strip())
 
 
 def normalize_tag(tag: str) -> str:
+    """Normalize a category/tag name for use in filenames and front matter."""
     return re.compile(r'[ \\/*?:"<>|{}]').sub('_', tag.strip())
 
 
 def process_categories(wikicode: Wikicode) -> Tuple[Wikicode, List[str]]:
+    """Extract categories and rewrite their wikilinks to index links.
+
+    Returns (wikicode, categories).
+    """
     wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     categories = []
     for link in wikicode.ifilter_wikilinks():
@@ -108,6 +116,7 @@ def process_categories(wikicode: Wikicode) -> Tuple[Wikicode, List[str]]:
 
 
 def embed_images(wikicode: Wikicode) -> Wikicode:
+    """Replace file/image wikilinks with Obsidian embeds, downloading images as needed."""
     wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     images = set()
     nodes = list(wikicode.nodes)  # make a list copy because we'll modify
@@ -130,6 +139,7 @@ def embed_images(wikicode: Wikicode) -> Wikicode:
 
 
 def get_image_url(filename: str) -> Optional[str]:
+    """Query the wiki API for the canonical URL of an image file."""
     url = f"{WIKI_URL}/api.php"
     params = {
         "action": "query",
@@ -153,6 +163,10 @@ def get_image_url(filename: str) -> Optional[str]:
 
 
 def download_image(image_name: str) -> Optional[str]:
+    """Download an image from the wiki into the vault ``OUTPUT_DIR/IMAGE_DIR`` directory.
+
+    Returns the local filename on success, or ``None`` on failure.
+    """
     if not image_name:
         return None
 
@@ -186,6 +200,7 @@ def download_image(image_name: str) -> Optional[str]:
 
 
 def infobox_to_dict(template: Template) -> Dict[str, Any]:
+    """Parse an infobox MediaWiki template into a flat dictionary."""
     infobox_data: Dict[str, Any] = {}
 
     raw_name = template.name.strip().lower()
@@ -205,6 +220,7 @@ def infobox_to_dict(template: Template) -> Dict[str, Any]:
 
 
 def infobox_dict_to_callout(infobox_data: Dict[str, Any]) -> str:
+    """Format an infobox dictionary as an Obsidian callout block."""
     callout_info = {
         data: str(infobox_data[data]).replace('\n', '')
         for data in infobox_data
@@ -225,6 +241,7 @@ def infobox_dict_to_callout(infobox_data: Dict[str, Any]) -> str:
 
 
 def transform_infobox_to_callout(wikicode: Wikicode) -> Wikicode:
+    """Replace all templates in wikitext with Obsidian callout equivalents."""
     wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     if len(wikicode.filter_templates()) == 0:
         return wikicode
@@ -251,6 +268,7 @@ def transform_infobox_to_callout(wikicode: Wikicode) -> Wikicode:
 
 
 def sanitize_for_yaml(obj: Any) -> Any:
+    """Recursively coerce values to YAML-safe primitives."""
     if isinstance(obj, dict):
         return {sanitize_for_yaml(k): sanitize_for_yaml(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -266,6 +284,7 @@ def build_yaml_header(
     tags: Union[List[str], str],
     extra_fields: Optional[Dict[str, Any]] = None,
 ) -> str:
+    """Build Obsidian-style YAML front matter for a page."""
     # Ensure tags are unique (if tags is a list), but preserve string if given
     tags = list(dict.fromkeys([tags] if isinstance(tags, str) else tags))
     header = {'title': title, 'tags': tags}
@@ -276,10 +295,13 @@ def build_yaml_header(
 
 
 def clean_heading_ids(md_text: str) -> str:
+    """Strip Pandoc-generated heading anchor IDs from markdown."""
     return re.compile(r'^(#{1,6} .+?)\s*\{\#.*?\}', re.MULTILINE).sub(r'\1', md_text)
 
 
 def fix_links_from_pandoc(md_text: str) -> str:
+    """Convert Pandoc wikilink syntax to Obsidian wikilink syntax."""
+
     def replace_wikilinks_no_files(match: re.Match) -> str:
         cleaned_filename = clean_filename(match.group(2).strip().replace('_', ' '))
         text = match.group(3).strip()
@@ -304,11 +326,8 @@ def fix_links_from_pandoc(md_text: str) -> str:
     return md_text_link_files_fixed
 
 
-def clean_residual_wikilink_artifacts(md_text: str) -> str:
-    return md_text.replace(' "wikilink"', '')
-
-
 def fix_image_links(md: str) -> str:
+    """Unescape backslashes before Obsidian image embed syntax."""
     return re.sub(r'\\(!\[\[)', r'\1', md)
 
 
@@ -337,15 +356,16 @@ def remove_obsidian_callout_block(md_text: str) -> str:
 
 
 def cleanup_markdown(md: str) -> str:
+    """Run the full post-Pandoc markdown cleanup pipeline."""
     md = clean_heading_ids(md)
     md = fix_links_from_pandoc(md)
-    md = clean_residual_wikilink_artifacts(md)
     md = fix_image_links(md)
     md = remove_obsidian_callout_block(md)
     return md
 
 
 def convert_with_pandoc(text: str, title: str = "") -> str:
+    """Convert wikitext to markdown via Pandoc, falling back to raw text on failure."""
     try:
         result = subprocess.run(
             ['pandoc', '--from=mediawiki', '--to=markdown-raw_attribute', '--wrap=none'],
@@ -403,6 +423,7 @@ def wrap_original_mediawiki_source(mediawiki_text: str) -> str:
 
 
 def convert_pages(tree: ET.ElementTree) -> None:
+    """Convert all pages in a MediaWiki XML export to markdown files."""
     ns = {"ns": NS}
     total_pages = len(tree.findall(".//ns:page", {"ns": NS}))
 
@@ -503,6 +524,7 @@ def create_tag_indexes() -> None:
 
 
 def main() -> None:
+    """Parse XML, convert pages, and create tag index pages."""
     logging.info("🔄 Converting MediaWiki XML to Obsidian Vault...")
     try:
         tree = ET.parse(INPUT_XML)
