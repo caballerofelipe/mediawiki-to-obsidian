@@ -1,6 +1,6 @@
 # MediaWiki to Markdown Vault Converter 🧭
 
-This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, infoboxes, and structured YAML frontmatter.
+This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, Obsidian callouts from wiki templates, and YAML frontmatter for titles and tags.
 
 🧭 If you're looking for a worldbuilding tool to connect your ideas, check out my app [Chronicler](https://chronicler.pro/) (source available [here](https://github.com/mak-kirkland/chronicler))
 
@@ -9,12 +9,12 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 ## ✨ Features
 
 - ✅ Converts MediaWiki pages to Obsidian-compatible Markdown
-- 🏷️ Extracts and normalizes categories as `tags`
-- 📦 Converts infoboxes into YAML frontmatter (including images)
-- 🔧 Infers tags from infobox types using noun inflection
+- 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[Index …]]` pages
+- 📦 Converts all `{{templates}}` into Obsidian callout blocks in place (infoboxes, navboxes, etc.)
+- 📄 On `Template:` namespace pages, preserves the original wikitext in a reference source block
 - 🖼️ Downloads and embeds images as `![[images/Filename]]` (supports `File:`, `Image:`, and `Media:` links)
 - 🔗 Converts internal links to Obsidian-safe `[[Wikilinks]]` via Pandoc post-processing
-- 📚 Automatically generates tag-based index files under `_indexes/`
+- 📚 Automatically generates tag-based index files under `indexes/` (e.g. `Index Characters.md`)
 - 🐢 Uses Pandoc for wikitext-to-Markdown conversion when available (recommended; falls back to raw wikitext on failure)
 - ⏭️ Optional `--skip-pandoc` flag to bypass Pandoc conversion entirely and keep raw wikitext
 - 🔐 Optional `--cookies` flag for authenticated wikis (private wikis, login-required image downloads)
@@ -44,9 +44,8 @@ Python dependencies are listed in `requirements.txt`. All packages use pinned ve
 | ------------------ | -------------------------------------- |
 | `mwparserfromhell` | Parse and manipulate wikitext          |
 | `requests`         | Download images from the wiki API      |
-| `pyyaml`           | Generate YAML frontmatter              |
+| `pyyaml`           | Generate YAML frontmatter (title/tags) |
 | `tqdm`             | Progress bar during conversion         |
-| `inflect`          | Infer tags from infobox template names |
 
 ## 🛠️ Installation
 
@@ -310,7 +309,7 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--skip-pandoc] [--v
 
 ### Skipping Pandoc (`--skip-pandoc`)
 
-Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, infoboxes, images, and YAML frontmatter are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
+Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, infobox callouts, images, and YAML frontmatter (title and tags) are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
 
 ```bash
 python convert.py wiki-dump.xml --skip-pandoc
@@ -318,7 +317,11 @@ python convert.py wiki-dump.xml --skip-pandoc
 
 ### Authenticated wikis (`--cookies`)
 
-If the wiki requires login to access images or the API, copy the `Cookie` header from an authenticated browser session (e.g. Developer Tools → Network → any request → Request Headers) and pass it to the script:
+Some wikis only allow logged-in users to download images or use the API. If you see a permission error during conversion, pass the `Cookie` header from an authenticated browser session:
+
+1. Log in to the wiki in your browser.
+2. Open Developer Tools → **Network**, reload a page, and copy the `Cookie` value from any request's headers.
+3. Run the script with `--cookies`:
 
 ```bash
 python convert.py wiki-dump.xml --cookies "sessionid=abc123; csrftoken=xyz789"
@@ -330,9 +333,9 @@ python convert.py wiki-dump.xml --cookies "sessionid=abc123; csrftoken=xyz789"
 
 ```text
 obsidian_vault/
-├── _indexes/
-│   ├── _people.md
-│   ├── _locations.md
+├── indexes/
+│   ├── Index Characters.md
+│   ├── Index Locations.md
 │   └── ...
 ├── images/
 │   ├── Example.jpg
@@ -341,6 +344,17 @@ obsidian_vault/
 ├── Page_Title_2.md
 └── ...
 ```
+
+Each converted page includes YAML frontmatter with `title` and `tags`. Wiki templates render as Obsidian callouts in place — wherever the template appeared in the original wikitext:
+
+```markdown
+> [!character]
+> - **name**: Aragorn
+> - **race**: [[Human]]
+> - **image**: ![[images/Aragorn.jpg]]
+```
+
+Category wikilinks in the body become links to the matching index page (e.g. `[[Index Characters]]` → `indexes/Index Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference.
 
 ## 👤 Author
 

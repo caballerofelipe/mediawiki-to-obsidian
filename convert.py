@@ -11,15 +11,12 @@ import sys
 from typing import Any, DefaultDict, Dict, List, Optional, Tuple, Union
 import xml.etree.ElementTree as ET
 
-import inflect
 import mwparserfromhell
 from mwparserfromhell.nodes import Template, Wikilink
 from mwparserfromhell.wikicode import Wikicode
 import requests
 from tqdm import tqdm
 import yaml
-
-p: inflect.engine = inflect.engine()
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
@@ -301,7 +298,6 @@ def clean_heading_ids(md_text: str) -> str:
 
 def fix_links_from_pandoc(md_text: str) -> str:
     """Convert Pandoc wikilink syntax to Obsidian wikilink syntax."""
-
     def replace_wikilinks_no_files(match: re.Match) -> str:
         cleaned_filename = clean_filename(match.group(2).strip().replace('_', ' '))
         text = match.group(3).strip()
