@@ -1,32 +1,36 @@
+import argparse
+from collections import defaultdict
+import copy
+from html import unescape
+import logging
 import os
 import re
 import shutil
 import subprocess
-import xml.etree.ElementTree as ET
-from html import unescape
-from collections import defaultdict
-import mwparserfromhell
 import sys
-import json
-import requests
-import yaml
-import argparse
-import inflect
-import logging
-from tqdm import tqdm
+from typing import Any, DefaultDict, Dict, List, Optional, Tuple, Union
+import xml.etree.ElementTree as ET
 
-p = inflect.engine()
+import inflect
+import mwparserfromhell
+from mwparserfromhell.nodes import Template, Wikilink
+from mwparserfromhell.wikicode import Wikicode
+import requests
+from tqdm import tqdm
+import yaml
+
+p: inflect.engine = inflect.engine()
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 IMAGE_DIR = "images"
 
 
-def TAG(t):
+def TAG(t: str) -> str:
     return f"{{{NS}}}{t}"
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert MediaWiki XML to Obsidian Vault")
     parser.add_argument("input_xml", help="Input XML file")
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
@@ -42,7 +46,7 @@ def parse_args():
     return parser.parse_args()
 
 
-args = parse_args()
+args: argparse.Namespace = parse_args()
 
 logging.basicConfig(
     level=logging.DEBUG if args.verbose else logging.INFO,
@@ -50,12 +54,12 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-INPUT_XML = args.input_xml
-OUTPUT_DIR = args.output_dir
-SKIP_REDIRECTS = args.skip_redirects
-SKIP_PANDOC = args.skip_pandoc
-COOKIES = args.cookies
-PANDOC_AVAILABLE = shutil.which("pandoc") is not None
+INPUT_XML: str = args.input_xml
+OUTPUT_DIR: str = args.output_dir
+SKIP_REDIRECTS: bool = args.skip_redirects
+SKIP_PANDOC: bool = args.skip_pandoc
+COOKIES: Optional[str] = args.cookies
+PANDOC_AVAILABLE: bool = shutil.which("pandoc") is not None
 
 if not SKIP_PANDOC and not PANDOC_AVAILABLE:
     logging.warning(
@@ -65,50 +69,51 @@ if not SKIP_PANDOC and not PANDOC_AVAILABLE:
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-tag_to_pages = defaultdict(list)
-filename_counts = defaultdict(int)
+tag_to_pages: DefaultDict[str, List[str]] = defaultdict(list)
+filename_counts: DefaultDict[str, int] = defaultdict(int)
 
-WIKI_URL = None
+WIKI_URL: Optional[str] = None
 
 
-def extract_wiki_url(tree):
-    global WIKI_URL
+def extract_wiki_url(tree: ET.ElementTree) -> str:
     ns = {"ns": NS}
     base_elem = tree.find(".//ns:siteinfo/ns:base", ns)
     if base_elem is not None and base_elem.text:
         base_url = base_elem.text.strip()
-        WIKI_URL = re.match(r"(https?://[^/]+)/", base_url).group(1)
-        if WIKI_URL:
-            return
+        match = re.match(r"(https?://[^/]+)/", base_url)
+        if match:
+            return match.group(1)
     raise ValueError("Could not extract wiki domain from <base> tag.")
 
 
-def clean_filename(title):
+def clean_filename(title: str) -> str:
     """Convert to safe filename with underscores"""
     return re.compile(r'[\\/*?:"<>|{}]').sub('_', title.strip())
 
 
-def normalize_tag(tag):
-    return tag.replace(" ", "_").lower()
+def normalize_tag(tag: str) -> str:
+    return re.compile(r'[ \\/*?:"<>|{}]').sub('_', tag.strip())
 
 
-def extract_categories(wikicode):
+def process_categories(wikicode: Wikicode) -> Tuple[Wikicode, List[str]]:
+    wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     categories = []
     for link in wikicode.ifilter_wikilinks():
         target = link.title.strip()
         if target.lower().startswith("category:"):
             cat = target[len("category:") :].strip()
             categories.append(normalize_tag(cat))
-            wikicode.remove(link)
+            wikicode.replace(link, f'[[Index {clean_filename(target[len("category:"):])}]]')
     return wikicode, categories
 
 
-def extract_images(wikicode):
+def embed_images(wikicode: Wikicode) -> Wikicode:
+    wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     images = set()
     nodes = list(wikicode.nodes)  # make a list copy because we'll modify
 
     for i, node in enumerate(nodes):
-        if isinstance(node, mwparserfromhell.wikicode.Wikilink):
+        if isinstance(node, Wikilink):
             target = node.title.strip()
             if target.lower().startswith(("file:", "image:", "media:")):
                 image_name = target.split(":", 1)[1].strip()
@@ -124,7 +129,7 @@ def extract_images(wikicode):
     return wikicode
 
 
-def get_image_url(filename):
+def get_image_url(filename: str) -> Optional[str]:
     url = f"{WIKI_URL}/api.php"
     params = {
         "action": "query",
@@ -133,22 +138,21 @@ def get_image_url(filename):
         "titles": filename,
         "iiprop": "url",
     }
-    try:
-        resp = requests.get(
-            url, params=params, timeout=10, headers={"Cookie": COOKIES} if COOKIES else None
-        )
-        data = resp.json()
-        pages = data.get("query", {}).get("pages", {})
-        for page in pages.values():
-            ii = page.get("imageinfo")
-            if ii:
-                return ii[0]["url"]
-    except Exception as e:
-        logging.error(f"❌ Failed to get image URL for {filename}: {e}")
+    resp = requests.get(
+        url, params=params, timeout=10, headers={"Cookie": COOKIES} if COOKIES else None
+    )
+    if resp.headers.get('MediaWiki-API-Error') == 'readapidenied':
+        raise PermissionError("Access to the wiki needs an account, pass cookies to the CLI.")
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    for page in pages.values():
+        ii = page.get("imageinfo")
+        if ii:
+            return ii[0]["url"]
     return None
 
 
-def download_image(image_name):
+def download_image(image_name: str) -> Optional[str]:
     if not image_name:
         return None
 
@@ -158,9 +162,10 @@ def download_image(image_name):
         logging.debug(f"🖼️ Skipping download (already exists): {safe_name}")
         return safe_name
 
-    url = get_image_url(f"File:{image_name}")
-    if not url:
-        logging.warning(f"❌ Could not find URL for image: {image_name}")
+    try:
+        url = get_image_url(f"File:{image_name}")
+    except Exception as e:
+        logging.error(f"‼️ Could not find URL for image: {image_name}: {e}")
         return None
 
     try:
@@ -173,65 +178,79 @@ def download_image(image_name):
             logging.debug(f"📥 Downloaded image: {safe_name}")
             return safe_name
         else:
-            logging.error(f"❌ Failed to download image: {image_name} ({resp.status_code})")
+            logging.error(f"‼️ Failed to download image: {image_name} ({resp.status_code})")
             return None
     except Exception as e:
-        logging.error(f"❌ Error downloading {image_name}: {e}")
+        logging.error(f"‼️ Error downloading {image_name}: {e}")
         return None
 
 
-def extract_infobox(wikicode):
-    infobox_data = {}
-    infobox_template = None
+def infobox_to_dict(template: Template) -> Dict[str, Any]:
+    infobox_data: Dict[str, Any] = {}
 
-    for template in wikicode.filter_templates():
-        if template.name.strip():
-            infobox_template = template
-            break
-
-    if not infobox_template:
-        return wikicode, {}
-
-    raw_name = infobox_template.name.strip().lower()
+    raw_name = template.name.strip().lower()
     if raw_name.startswith("infobox_"):
-        infobox_type = raw_name[len("infobox_") :].replace(' ', '_').title()
+        infobox_type = raw_name[len("infobox_") :].replace(' ', '_')  # .title()
     else:
-        infobox_type = infobox_template.name
+        infobox_type = template.name
 
     infobox_data['infobox'] = infobox_type
 
-    for param in infobox_template.params:
+    for param in template.params:
         key = param.name.strip().replace(":", "").lower()
         val = param.value.strip()
+        infobox_data[key] = val
 
-        wikilinks = re.compile(r'\[\[(.*?)\]\]', re.DOTALL).findall(val)
-        if wikilinks:
-            parts = []
-            remaining = val
-            for link in wikilinks:
-                before, link_part, remaining = remaining.partition(f"[[{link}]]")
-                if before.strip():
-                    parts.append(before.strip())
-                parts.append(f"[[{link}]]")
-            if remaining.strip():
-                parts.append(remaining.strip())
-            infobox_data[key] = parts
-        else:
-            infobox_data[key] = val
+    return infobox_data
 
-    wikicode.remove(infobox_template)
 
-    # Extract the image from the infox and inline it at top of markdown
+def infobox_dict_to_callout(infobox_data: Dict[str, Any]) -> str:
+    callout_info = {
+        data: str(infobox_data[data]).replace('\n', '')
+        for data in infobox_data
+        if data not in ('infobox', 'image')  # These are treated differently
+    }
+
+    callout = ''
+    callout += f'\n> [!{infobox_data['infobox']}]' if infobox_data['infobox'] else '\n> [!NOTE]'
     if image_name := infobox_data.get('image'):
         image_name = image_name.strip()
         download_image(image_name)
-        embed = f"![[{IMAGE_DIR}/{image_name}]]\n\n"
-        wikicode.insert(0, embed)
+        callout += f'\n> - **image**: ![[{IMAGE_DIR}/{image_name}]]'
 
-    return wikicode, infobox_data
+    for data in callout_info:
+        callout += f'\n> - **{data}**: {callout_info[data]}'
+
+    return callout
 
 
-def sanitize_for_yaml(obj):
+def transform_infobox_to_callout(wikicode: Wikicode) -> Wikicode:
+    wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
+    if len(wikicode.filter_templates()) == 0:
+        return wikicode
+
+    while template_list := wikicode.filter_templates():
+        template = template_list[0]
+        infobox_dict = infobox_to_dict(template)
+        callout = infobox_dict_to_callout(infobox_dict)
+
+        use_pandoc = not SKIP_PANDOC and PANDOC_AVAILABLE
+        callout_to_insert = '\n'
+        if use_pandoc:
+            callout_to_insert += '\n<source lang="obsidian-callout-block">'
+            callout_to_insert += callout
+            callout_to_insert += '\n</source>'
+        else:
+            callout_to_insert += callout
+
+        callout_to_insert += '\n'
+
+        wikicode.replace(template, callout_to_insert)
+
+    return wikicode
+
+
+def sanitize_for_yaml(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {sanitize_for_yaml(k): sanitize_for_yaml(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -242,7 +261,13 @@ def sanitize_for_yaml(obj):
         return str(obj)
 
 
-def extract_yaml_header(title, tags, extra_fields=None):
+def build_yaml_header(
+    title: str,
+    tags: Union[List[str], str],
+    extra_fields: Optional[Dict[str, Any]] = None,
+) -> str:
+    # Ensure tags are unique (if tags is a list), but preserve string if given
+    tags = list(dict.fromkeys([tags] if isinstance(tags, str) else tags))
     header = {'title': title, 'tags': tags}
     if extra_fields:
         header.update(sanitize_for_yaml(extra_fields))
@@ -250,12 +275,12 @@ def extract_yaml_header(title, tags, extra_fields=None):
     return f"---\n{yaml.safe_dump(header, sort_keys=False)}---\n"
 
 
-def clean_heading_ids(md_text):
+def clean_heading_ids(md_text: str) -> str:
     return re.compile(r'^(#{1,6} .+?)\s*\{\#.*?\}', re.MULTILINE).sub(r'\1', md_text)
 
 
-def fix_links_from_pandoc(md_text):
-    def replace_wikilinks_no_files(match: re.Match):
+def fix_links_from_pandoc(md_text: str) -> str:
+    def replace_wikilinks_no_files(match: re.Match) -> str:
         cleaned_filename = clean_filename(match.group(2).strip().replace('_', ' '))
         text = match.group(3).strip()
         if cleaned_filename == text:
@@ -268,7 +293,7 @@ def fix_links_from_pandoc(md_text):
         replace_wikilinks_no_files, md_text
     )
 
-    def replace_wikilink_inline_files(match: re.Match):
+    def replace_wikilink_inline_files(match: re.Match) -> str:
         text = match.group(3).strip()
         return f'![[{text}]]'
 
@@ -279,26 +304,51 @@ def fix_links_from_pandoc(md_text):
     return md_text_link_files_fixed
 
 
-def clean_residual_wikilink_artifacts(md_text):
+def clean_residual_wikilink_artifacts(md_text: str) -> str:
     return md_text.replace(' "wikilink"', '')
 
 
-def fix_image_links(md):
+def fix_image_links(md: str) -> str:
     return re.sub(r'\\(!\[\[)', r'\1', md)
 
 
-def cleanup_markdown(md):
+def remove_obsidian_callout_block(md_text: str) -> str:
+    """
+    Removes code blocks with language 'obsidian-callout-block' from the markdown text.
+
+    This function removes code blocks created as <source lang="obsidian-callout-block">
+    in the transform_infobox_to_callout function. The cleanup is only needed—and only
+    takes place—when Pandoc is used, because Pandoc preserves these fenced code blocks.
+
+    Args:
+        md_text (str): The markdown content.
+
+    Returns:
+        str: Markdown content with 'obsidian-callout-block' code blocks removed, leaving only their content.
+    """
+    # This regex finds fenced code blocks with lang 'obsidian-callout-block' and replaces the whole block
+    # (including the fences) with just the content inside the block.
+    return re.sub(
+        r'```\s*obsidian-callout-block\s*\n(.*?)```',
+        r'\1',
+        md_text,
+        flags=re.DOTALL,
+    )
+
+
+def cleanup_markdown(md: str) -> str:
     md = clean_heading_ids(md)
     md = fix_links_from_pandoc(md)
     md = clean_residual_wikilink_artifacts(md)
     md = fix_image_links(md)
+    md = remove_obsidian_callout_block(md)
     return md
 
 
-def convert_with_pandoc(text, title=""):
+def convert_with_pandoc(text: str, title: str = "") -> str:
     try:
         result = subprocess.run(
-            ['pandoc', '--from=mediawiki', '--to=markdown', '--wrap=none'],
+            ['pandoc', '--from=mediawiki', '--to=markdown-raw_attribute', '--wrap=none'],
             input=text.encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -317,11 +367,11 @@ def convert_with_pandoc(text, title=""):
         return text
 
 
-def clean_and_convert_text(raw_text, title):
+def prepare_wikitext(raw_text: str, title: str) -> Tuple[str, str, List[str]]:
     """Parse MediaWiki wikitext and prepare it for Pandoc conversion.
 
-    Extracts categories, images, and infobox data; builds an Obsidian YAML
-    front matter header; and records tags in the global tag index.
+    Processes categories and images, transforms infoboxes, builds an Obsidian YAML
+    front matter header, and records tags in the global tag index.
 
     Note: Tags will become a file and a property, weird characters will break linking,
     cleaning for good filenames with `clean_filename()`
@@ -330,27 +380,14 @@ def clean_and_convert_text(raw_text, title):
     """
     text = unescape(raw_text)
     wikicode = mwparserfromhell.parse(text)
-    wikicode, tags = extract_categories(wikicode)
-    wikicode = extract_images(wikicode)
-    wikicode, infobox_data = extract_infobox(wikicode)
+    wikicode, tags = process_categories(wikicode)
+    wikicode = embed_images(wikicode)
 
-    tags = [clean_filename(tag) for tag in tags]
-
-    # Conditionally infer tag
-    if infobox_data.get('infobox'):
-        infobox_name = str(infobox_data['infobox'])
-
-        if not p.singular_noun(infobox_name):
-            infobox_name = p.plural(infobox_name)
-
-        inferred_tag = normalize_tag(infobox_name)
-
-        if inferred_tag not in tags:
-            tags.append(inferred_tag)
+    wikicode = transform_infobox_to_callout(wikicode)
 
     cleaned_text = str(wikicode).strip()
     title = clean_filename(title)
-    yaml_header = extract_yaml_header(title, tags, infobox_data)
+    yaml_header = build_yaml_header(title, tags)
 
     # Track tags for index
     for tag in tags:
@@ -359,7 +396,13 @@ def clean_and_convert_text(raw_text, title):
     return yaml_header, cleaned_text, tags
 
 
-def convert_pages(tree):
+def wrap_original_mediawiki_source(mediawiki_text: str) -> str:
+    """Wrap raw MediaWiki wikitext in a preserved source block."""
+    escaped_text = mediawiki_text.replace('</source>', '&lt;/source&gt;')
+    return '\n<source lang="original-mediawiki-source">' f'{escaped_text}' '\n</source>' '\n\n'
+
+
+def convert_pages(tree: ET.ElementTree) -> None:
     ns = {"ns": NS}
     total_pages = len(tree.findall(".//ns:page", {"ns": NS}))
 
@@ -404,8 +447,15 @@ def convert_pages(tree):
                 pbar.update(1)
                 continue
 
-            raw_text = text_elem.text
-            yaml_str, wikitext, tags = clean_and_convert_text(raw_text, title)
+            raw_text = ''
+            if title.startswith('Template:'):
+                # Add the original source to the file if it's a Template
+                # Used for reference because the template will be changed completely
+                # Because parts are treated like infoboxes
+                raw_text += wrap_original_mediawiki_source(text_elem.text)
+            raw_text += text_elem.text
+            yaml_str, wikitext, tags = prepare_wikitext(raw_text, title)
+
             if not SKIP_PANDOC and PANDOC_AVAILABLE:
                 wikitext = convert_with_pandoc(wikitext, title)
                 wikitext = cleanup_markdown(wikitext)
@@ -425,44 +475,46 @@ def convert_pages(tree):
     logging.info("✅ Main articles converted")
 
 
-def create_tag_indexes():
+def create_tag_indexes() -> None:
     """Write Obsidian index pages for each collected tag.
 
-    Uses the global tag_to_pages map populated during conversion(`clean_and_convert_text()`)
+    Uses the global tag_to_pages map populated during conversion (`prepare_wikitext()`)
     to emit one markdown file per tag under _indexes/, each with YAML front matter and
     wikilinks to every page in that tag.
 
     Note: Tags and page titles become filenames and wikilinks; weird characters
     will break linking, so both are cleaned with `clean_filename()`.
     """
-    index_dir = os.path.join(OUTPUT_DIR, "_indexes")
+    dir_name = "indexes"
+    index_dir = os.path.join(OUTPUT_DIR, dir_name)
     os.makedirs(index_dir, exist_ok=True)
     for tag, pages in tag_to_pages.items():
-        tag = clean_filename(tag)
+        tag_filename = ' '.join(str(tag).replace('_', ' ').split())
         display_tag = tag
-        yaml_header = extract_yaml_header(f"Index: {display_tag}", tag)
+        yaml_header = build_yaml_header(f"Index: {display_tag}", tag)
         lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages):
             display_page = clean_filename(page)
             lines.append(f"- [[{display_page}]]")
         content = yaml_header + "\n".join(lines)
-        with open(os.path.join(index_dir, f"_{tag}.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(index_dir, f"Index {tag_filename}.md"), "w", encoding="utf-8") as f:
             f.write(content)
-    logging.info("📚 Index pages created under _indexes/ with tag references")
+    logging.info(f"📚 Index pages created under {dir_name}/ with tag references")
 
 
-def main():
+def main() -> None:
     logging.info("🔄 Converting MediaWiki XML to Obsidian Vault...")
     try:
         tree = ET.parse(INPUT_XML)
     except ET.ParseError as e:
-        logging.error(f"❌ Failed to parse XML: {e}")
+        logging.error(f"‼️ Failed to parse XML: {e}")
         return
 
     try:
-        extract_wiki_url(tree)
+        global WIKI_URL
+        WIKI_URL = extract_wiki_url(tree)
     except ValueError as e:
-        logging.error(f"❌ {e}")
+        logging.error(f"‼️ {e}")
         return
 
     convert_pages(tree)
