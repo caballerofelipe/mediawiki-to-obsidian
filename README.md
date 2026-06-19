@@ -1,6 +1,6 @@
 # MediaWiki to Markdown Vault Converter 🧭
 
-This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, Obsidian callouts from wiki templates, and YAML frontmatter for titles and tags.
+This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, Obsidian callouts from wiki templates, YAML frontmatter for titles and tags, and provenance fields linking each page back to the original wiki.
 
 🧭 If you're looking for a worldbuilding tool to connect your ideas, check out my app [Chronicler](https://chronicler.pro/) (source available [here](https://github.com/mak-kirkland/chronicler))
 
@@ -10,6 +10,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 
 - ✅ Converts MediaWiki pages to Obsidian-compatible Markdown
 - 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[Index …]]` pages
+- 📋 Adds YAML `source/*` fields on each page — wiki generator, site URL, page URL, and revision date
 - 📦 Converts all `{{templates}}` into Obsidian callout blocks in place (infoboxes, navboxes, etc.)
 - 📄 On `Template:` namespace pages, preserves the original wikitext in a reference source block
 - 🖼️ Downloads and embeds images as `![[images/Filename]]` (supports `File:`, `Image:`, and `Media:` links)
@@ -45,7 +46,7 @@ Python dependencies are listed in `requirements.txt`. All packages use pinned ve
 | ------------------ | -------------------------------------- |
 | `mwparserfromhell` | Parse and manipulate wikitext          |
 | `requests`         | Download images from the wiki API      |
-| `pyyaml`           | Generate YAML frontmatter (title/tags) |
+| `pyyaml`           | Generate YAML frontmatter (title, tags, source) |
 | `tqdm`             | Progress bar during conversion         |
 
 ## 🛠️ Installation
@@ -238,7 +239,7 @@ pandoc --version
 
 ## 📥 Creating the input XML file
 
-`convert.py` expects a MediaWiki XML export — the same format produced by [Special:Export](https://www.mediawiki.org/wiki/Special:Export) or `dumpBackup.php`. The file must include a `<base>` URL in `<siteinfo>` so the script can resolve image downloads.
+`convert.py` expects a MediaWiki XML export — the same format produced by [Special:Export](https://www.mediawiki.org/wiki/Special:Export) or `dumpBackup.php`. The file must include `<siteinfo>` with a `<base>` URL (for image downloads and page links) and a `<generator>` tag (for the source note in frontmatter).
 
 ### CLI (preferred)
 
@@ -311,7 +312,7 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--pandoc-skip] [--p
 
 ### Skipping Pandoc (`--pandoc-skip`)
 
-Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, template callouts, images, and YAML frontmatter (title and tags) are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
+Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, template callouts, images, YAML frontmatter (title, tags, and source fields), and image downloads are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
 
 ```bash
 python convert.py wiki-dump.xml --pandoc-skip
@@ -371,7 +372,28 @@ obsidian_vault/
 └── ...
 ```
 
-Each converted page includes YAML frontmatter with `title` and `tags`. Wiki templates render as Obsidian callouts in place — wherever the template appeared in the original wikitext:
+Each converted page includes YAML frontmatter with `title`, `tags`, and source provenance read from the XML export:
+
+```yaml
+---
+title: Aragorn
+tags:
+  - Characters
+source/note: Imported from MediaWiki 1.41.0 website @ https://your-wiki.example
+source/url: https://your-wiki.example/wiki/Aragorn
+source/date: '2024-06-18T10:30:00Z'
+---
+```
+
+| Field         | Source in XML export | Description |
+| ------------- | -------------------- | ----------- |
+| `source/note` | `<generator>` + `<base>` | Human-readable import note (e.g. `Imported from MediaWiki 1.41.0 website @ https://…`) |
+| `source/url`  | `<base>` + page title | Direct link to that page on the wiki |
+| `source/date` | `<timestamp>` on the revision used | UTC date of the exported revision (ISO 8601) |
+
+Index pages under `indexes/` only include `title` and `tags` — they are generated locally, not imported from the wiki.
+
+Wiki templates render as Obsidian callouts in place — wherever the template appeared in the original wikitext:
 
 ```markdown
 > [!character]

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from typing import Any, DefaultDict, Dict, List, Optional, Tuple, Union
+from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 import xml.etree.ElementTree as ET
 
 import mwparserfromhell
@@ -78,18 +79,70 @@ tag_to_pages: DefaultDict[str, List[str]] = defaultdict(list)
 filename_counts: DefaultDict[str, int] = defaultdict(int)
 
 WIKI_URL: Optional[str] = None
+WIKI_BASE_URL: Optional[str] = None
+WIKI_GENERATOR: Optional[str] = None
 
 
-def extract_wiki_url(tree: ET.ElementTree) -> str:
-    """Extract the wiki base URL (scheme + host) from a MediaWiki XML export."""
+def extract_wiki_url(tree: ET.ElementTree) -> Tuple[str, str, str]:
+    """Extract wiki host URL, full base page URL, and generator from a MediaWiki XML export."""
     ns = {"ns": NS}
-    base_elem = tree.find(".//ns:siteinfo/ns:base", ns)
+    siteinfo = tree.find(".//ns:siteinfo", ns)
+    if siteinfo is None:
+        raise ValueError("Could not find <siteinfo> in XML export.")
+
+    generator_elem = siteinfo.find("ns:generator", ns)
+    generator = "MediaWiki"
+    if generator_elem is not None and generator_elem.text:
+        generator = generator_elem.text.strip()
+
+    base_elem = siteinfo.find("ns:base", ns)
     if base_elem is not None and base_elem.text:
         base_url = base_elem.text.strip()
         match = re.match(r"(https?://[^/]+)/", base_url)
         if match:
-            return match.group(1)
+            return match.group(1), base_url, generator
     raise ValueError("Could not extract wiki domain from <base> tag.")
+
+
+def build_mediawiki_page_url(page_title: str) -> str:
+    """Build a canonical wiki URL for ``page_title`` using the export ``<base>`` URL."""
+    if not WIKI_BASE_URL:
+        raise ValueError("Wiki base URL not set.")
+
+    wiki_title = page_title.replace(" ", "_")
+    parsed = urlparse(WIKI_BASE_URL)
+
+    if parsed.query and "title=" in parsed.query.lower():
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        query["title"] = [wiki_title]
+        return urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                urlencode(query, doseq=True),
+                parsed.fragment,
+            )
+        )
+
+    path_dir, _, _ = parsed.path.rpartition("/")
+    encoded_title = quote(wiki_title, safe=":/")
+    new_path = f"{path_dir}/{encoded_title}" if path_dir else f"/{encoded_title}"
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, new_path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
+def build_source_fields(page_title: str, revision_date: Optional[str] = None) -> Dict[str, Any]:
+    """Build YAML front matter fields describing the original MediaWiki source."""
+    fields = {
+        "source/note": f"Imported from {WIKI_GENERATOR} website @ {WIKI_URL}",
+        "source/url": build_mediawiki_page_url(page_title),
+    }
+    if revision_date:
+        fields["source/date"] = revision_date
+    return fields
 
 
 def clean_filename(title: str) -> str:
@@ -389,7 +442,9 @@ def convert_with_pandoc(text: str, title: str = "") -> str:
         return text
 
 
-def prepare_wikitext(raw_text: str, title: str) -> Tuple[str, str, List[str]]:
+def prepare_wikitext(
+    raw_text: str, title: str, revision_date: Optional[str] = None
+) -> Tuple[str, str, List[str]]:
     """Parse MediaWiki wikitext and prepare it for Pandoc conversion.
 
     Processes categories and images, transforms templates to callouts, builds an Obsidian YAML
@@ -408,8 +463,11 @@ def prepare_wikitext(raw_text: str, title: str) -> Tuple[str, str, List[str]]:
     wikicode = transform_templates_to_callouts(wikicode)
 
     cleaned_text = str(wikicode).strip()
+    page_title = title.strip()
     title = clean_filename(title)
-    yaml_header = build_yaml_header(title, tags)
+    yaml_header = build_yaml_header(
+        title, tags, extra_fields=build_source_fields(page_title, revision_date)
+    )
 
     # Track tags for index
     for tag in tags:
@@ -477,7 +535,13 @@ def convert_pages(tree: ET.ElementTree) -> None:
                 # Because template invocations are converted to callouts in article wikitext
                 raw_text += wrap_original_mediawiki_source(text_elem.text)
             raw_text += text_elem.text
-            yaml_str, wikitext, tags = prepare_wikitext(raw_text, title)
+            timestamp_elem = latest_revision.find(TAG("timestamp"))
+            revision_date = (
+                timestamp_elem.text.strip()
+                if timestamp_elem is not None and timestamp_elem.text
+                else None
+            )
+            yaml_str, wikitext, tags = prepare_wikitext(raw_text, title, revision_date)
 
             if not PANDOC_SKIP and PANDOC_AVAILABLE:
                 wikitext = convert_with_pandoc(wikitext, title)
@@ -535,8 +599,8 @@ def main() -> None:
         return
 
     try:
-        global WIKI_URL
-        WIKI_URL = extract_wiki_url(tree)
+        global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR
+        WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR = extract_wiki_url(tree)
     except ValueError as e:
         logging.error(f"‼️ {e}")
         return
