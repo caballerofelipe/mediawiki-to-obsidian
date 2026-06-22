@@ -213,3 +213,32 @@ Original category page content.
     assert "title: Category Characters" in content
     assert "# Characters Index" in content
     assert "- [[Aragorn]]" in content
+
+
+def test_create_tag_indexes_skips_duplicate_index_content(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(convert, "OUTPUT_DIR", str(tmp_path))
+    category_dir = tmp_path / "categories"
+    category_dir.mkdir()
+    index_section = "# Characters Index\n- [[Aragorn]]"
+    existing = f"""---
+title: Category Characters
+tags:
+- existing_tag
+---
+Original category page content.
+
+{index_section}
+"""
+    filepath = category_dir / "Category Characters.md"
+    filepath.write_text(existing, encoding="utf-8")
+
+    convert.tag_to_pages.clear()
+    convert.tag_to_pages["Characters"] = ["Aragorn"]
+
+    create_tag_indexes()
+
+    content = filepath.read_text(encoding="utf-8")
+    assert content.count("# Characters Index") == 1
+    assert content.count("- [[Aragorn]]") == 1
+    assert "Original category page content." in content
+    assert "- Characters" in content

@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from typing import Any, DefaultDict, Dict, List, Optional, Tuple, Union
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 import xml.etree.ElementTree as ET
@@ -143,11 +144,12 @@ def build_mediawiki_page_url(page_title: str) -> str:
     )
 
 
-def build_source_fields(page_title: str, revision_date: Optional[str] = None) -> Dict[str, Any]:
+def build_source_fields(original_title: str, revision_date: Optional[str] = None) -> Dict[str, Any]:
     """Build YAML front matter fields describing the original MediaWiki source."""
     fields = {
+        "source/original_title": original_title,
         "source/note": f"Imported from {WIKI_NAME} ({WIKI_GENERATOR}) @ {WIKI_URL}",
-        "source/url": build_mediawiki_page_url(page_title),
+        "source/url": build_mediawiki_page_url(original_title),
     }
     if revision_date:
         fields["source/date"] = revision_date
@@ -162,6 +164,15 @@ def clean_filename(title: str) -> str:
 def normalize_tag(tag: str) -> str:
     """Normalize a category/tag name for use in filenames and front matter."""
     return re.compile(r'[ \\/*?:"<>|{}]').sub('_', tag.strip())
+
+
+def sort_key_without_diacritics(text: str) -> str:
+    """Return a case-insensitive sort key with diacritical marks stripped."""
+    normalized = unicodedata.normalize("NFKD", text)
+    without_marks = "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    )
+    return without_marks.casefold()
 
 
 def process_categories(wikicode: Wikicode) -> Tuple[Wikicode, List[str]]:
@@ -482,7 +493,7 @@ def convert_with_pandoc(text: str, title: str = "") -> str:
 
 
 def prepare_wikitext(
-    raw_text: str, title: str, revision_date: Optional[str] = None
+    raw_text: str, original_title: str, revision_date: Optional[str] = None
 ) -> Tuple[str, str, List[str]]:
     """Parse MediaWiki wikitext and prepare it for Pandoc conversion.
 
@@ -502,15 +513,13 @@ def prepare_wikitext(
     wikicode = transform_templates_to_callouts(wikicode)
 
     cleaned_text = str(wikicode).strip()
-    page_title = title.strip()
-    title = clean_filename(title)
     yaml_header = build_yaml_header(
-        title, tags, extra_fields=build_source_fields(page_title, revision_date)
+        original_title, tags, extra_fields=build_source_fields(original_title, revision_date)
     )
 
     # Track tags for index
     for tag in tags:
-        tag_to_pages[tag].append(title)
+        tag_to_pages[tag].append(original_title)
 
     return yaml_header, cleaned_text, tags
 
@@ -542,7 +551,7 @@ def convert_pages(tree: ET.ElementTree) -> None:
                 pbar.update(1)
                 continue
 
-            title = title_elem.text.strip()
+            title = original_title = title_elem.text.strip()
             logging.debug(f"✅ Found page: {title}")
 
             latest_revision = None
@@ -587,10 +596,10 @@ def convert_pages(tree: ET.ElementTree) -> None:
                 if timestamp_elem is not None and timestamp_elem.text
                 else None
             )
-            yaml_str, wikitext, tags = prepare_wikitext(raw_text, title, revision_date)
+            yaml_str, wikitext, tags = prepare_wikitext(raw_text, original_title, revision_date)
 
             if not PANDOC_SKIP and PANDOC_AVAILABLE:
-                wikitext = convert_with_pandoc(wikitext, title)
+                wikitext = convert_with_pandoc(wikitext, original_title)
                 wikitext = cleanup_markdown(wikitext)
             markdown = f"{yaml_str}\n{wikitext.strip()}\n"
             base_filename = clean_filename(title)
@@ -627,9 +636,14 @@ def create_tag_indexes() -> None:
         tag_filename = ' '.join(str(tag).replace('_', ' ').split())
         display_tag = tag
         index_lines = [f"# {display_tag.title()} Index"]
-        for page in sorted(pages):
-            display_page = clean_filename(page)
-            index_lines.append(f"- [[{display_page}]]")
+        for page in sorted(pages, key=sort_key_without_diacritics):
+            if page.startswith('Category:'):
+                page = re.sub('^Category:', 'Category ', page)
+                display_page = clean_filename(page)
+                index_lines.append(f"- [[{CATEGORY_DIR}/{display_page}|{display_page}]]")
+            else:
+                display_page = clean_filename(page)
+                index_lines.append(f"- [[{display_page}]]")
         index_content = "\n".join(index_lines)
         filepath = os.path.join(index_dir, f"Category {tag_filename}.md")
         if os.path.exists(filepath):
@@ -643,10 +657,15 @@ def create_tag_indexes() -> None:
                 yaml_header = build_yaml_header(
                     title, merged_tags, extra_fields=extra_fields or None
                 )
-                content = yaml_header + body.rstrip() + f"\n\n{index_content}\n"
             else:
                 yaml_header = build_yaml_header(f"Index: {display_tag}", tag)
-                content = yaml_header + existing_content.rstrip() + f"\n\n{index_content}\n"
+
+            text_body = body.rstrip()
+            if index_content not in text_body:
+                text_body += f"\n\n{index_content}\n"
+            else:
+                text_body += "\n"
+            content = yaml_header + text_body
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
         else:
