@@ -22,6 +22,7 @@ import yaml
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 IMAGE_DIR = "images"
+CATEGORY_DIR = "categories"
 
 
 def TAG(t: str) -> str:
@@ -175,7 +176,7 @@ def process_categories(wikicode: Wikicode) -> Tuple[Wikicode, List[str]]:
         if target.lower().startswith("category:"):
             cat = target[len("category:") :].strip()
             categories.append(normalize_tag(cat))
-            wikicode.replace(link, f'[[Index {clean_filename(target[len("category:"):])}]]')
+            wikicode.replace(link, f'[[Category {clean_filename(target[len("category:"):])}]]')
     return wikicode, categories
 
 
@@ -358,6 +359,36 @@ def build_yaml_header(
     return f"---\n{yaml.safe_dump(header, sort_keys=False)}---\n"
 
 
+def split_front_matter(content: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Split YAML front matter from markdown body. Returns (header dict or None, body)."""
+    if not content.startswith("---\n"):
+        return None, content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return None, content
+    try:
+        header = yaml.safe_load(content[4:end]) or {}
+    except yaml.YAMLError:
+        return None, content
+    if not isinstance(header, dict):
+        return None, content
+    return header, content[end + 5 :]
+
+
+def merge_tags(
+    existing: Union[List[str], str, None], new: Union[List[str], str]
+) -> List[str]:
+    """Merge tag values into a deduplicated list, preserving order."""
+    def as_list(tags: Union[List[str], str, None]) -> List[str]:
+        if tags is None:
+            return []
+        if isinstance(tags, str):
+            return [tags]
+        return list(tags)
+
+    return list(dict.fromkeys(as_list(existing) + as_list(new)))
+
+
 def clean_heading_ids(md_text: str) -> str:
     """Strip Pandoc-generated heading anchor IDs from markdown."""
     return re.compile(r'^(#{1,6} .+?)\s*\{\#.*?\}', re.MULTILINE).sub(r'\1', md_text)
@@ -499,6 +530,8 @@ def convert_pages(tree: ET.ElementTree) -> None:
 
     with tqdm(total=total_pages, desc="Converting pages", disable=disable_tqdm) as pbar:
         for page in tree.findall(".//ns:page", ns):
+            page_subdir = "" # Used in case we want to create the file inside a subdir
+
             title_elem = page.find("ns:title", ns)
             if title_elem is None or not title_elem.text:
                 pbar.update(1)
@@ -537,11 +570,16 @@ def convert_pages(tree: ET.ElementTree) -> None:
                 continue
 
             raw_text = ''
+            
             if title.startswith('Template:'):
                 # Add the original source to the file if it's a Template
                 # Used for reference because the template will be changed completely
                 # Because template invocations are converted to callouts in article wikitext
                 raw_text += wrap_original_mediawiki_source(text_elem.text)
+            if title.startswith('Category:'):
+                title = re.sub('^Category:', 'Category ', title)
+                page_subdir = CATEGORY_DIR
+
             raw_text += text_elem.text
             timestamp_elem = latest_revision.find(TAG("timestamp"))
             revision_date = (
@@ -559,7 +597,8 @@ def convert_pages(tree: ET.ElementTree) -> None:
             count = filename_counts[base_filename]
             filename_counts[base_filename] += 1
             filename = f"{base_filename}{'_' + str(count) if count else ''}.md"
-            filepath = os.path.join(OUTPUT_DIR, filename)
+            filepath = os.path.join(OUTPUT_DIR, page_subdir, filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
             with open(filepath, "w", encoding="utf-8") as f:
                 logging.debug(f"✍️ Writing: {filepath}")
@@ -574,27 +613,47 @@ def create_tag_indexes() -> None:
     """Write Obsidian index pages for each collected tag.
 
     Uses the global tag_to_pages map populated during conversion (`prepare_wikitext()`)
-    to emit one markdown file per tag under _indexes/, each with YAML front matter and
-    wikilinks to every page in that tag.
+    to emit one markdown file per tag under categories/, each with YAML front matter and
+    wikilinks to every page in that tag. If a category file already exists (e.g. from a
+    wiki Category: page), existing tags in the YAML front matter are merged with the
+    index tag and the index section is appended to the body.
 
     Note: Tags and page titles become filenames and wikilinks; weird characters
     will break linking, so both are cleaned with `clean_filename()`.
     """
-    dir_name = "indexes"
-    index_dir = os.path.join(OUTPUT_DIR, dir_name)
+    index_dir = os.path.join(OUTPUT_DIR, CATEGORY_DIR)
     os.makedirs(index_dir, exist_ok=True)
     for tag, pages in tag_to_pages.items():
         tag_filename = ' '.join(str(tag).replace('_', ' ').split())
         display_tag = tag
-        yaml_header = build_yaml_header(f"Index: {display_tag}", tag)
-        lines = [f"# {display_tag.title()} Index"]
+        index_lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages):
             display_page = clean_filename(page)
-            lines.append(f"- [[{display_page}]]")
-        content = yaml_header + "\n".join(lines)
-        with open(os.path.join(index_dir, f"Index {tag_filename}.md"), "w", encoding="utf-8") as f:
-            f.write(content)
-    logging.info(f"📚 Index pages created under {dir_name}/ with tag references")
+            index_lines.append(f"- [[{display_page}]]")
+        index_content = "\n".join(index_lines)
+        filepath = os.path.join(index_dir, f"Category {tag_filename}.md")
+        if os.path.exists(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                existing_content = f.read()
+            header, body = split_front_matter(existing_content)
+            if header is not None:
+                merged_tags = merge_tags(header.get("tags"), tag)
+                title = header.get("title", f"Index: {display_tag}")
+                extra_fields = {k: v for k, v in header.items() if k not in ("title", "tags")}
+                yaml_header = build_yaml_header(
+                    title, merged_tags, extra_fields=extra_fields or None
+                )
+                content = yaml_header + body.rstrip() + f"\n\n{index_content}\n"
+            else:
+                yaml_header = build_yaml_header(f"Index: {display_tag}", tag)
+                content = yaml_header + existing_content.rstrip() + f"\n\n{index_content}\n"
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
+        else:
+            yaml_header = build_yaml_header(f"Index: {display_tag}", tag)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(yaml_header + index_content + "\n")
+    logging.info(f"📚 Index pages created under {CATEGORY_DIR}/ with tag references")
 
 
 def main() -> None:

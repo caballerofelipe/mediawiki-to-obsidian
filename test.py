@@ -3,6 +3,10 @@
 Pandoc link post-processing tests reflect output from Pandoc 3.9.0.2.
 """
 
+import sys
+
+sys.argv = ["test.py", "dummy.xml"]
+
 import mwparserfromhell
 import convert
 from convert import (
@@ -12,6 +16,10 @@ from convert import (
     build_mediawiki_page_url,
     build_source_fields,
     transform_templates_to_callouts,
+    merge_tags,
+    split_front_matter,
+    process_categories,
+    create_tag_indexes,
 )
 
 
@@ -125,3 +133,83 @@ def test_transform_templates_to_callouts(monkeypatch) -> None:
     cleaned_wikicode = transform_templates_to_callouts(wikicode)
 
     assert str(cleaned_wikicode) == wikitext_with_callout
+
+
+# Test 5: Category helpers
+def test_merge_tags_expands_and_dedupes() -> None:
+    assert merge_tags(["a", "b"], "c") == ["a", "b", "c"]
+    assert merge_tags("solo", ["solo", "new"]) == ["solo", "new"]
+    assert merge_tags(None, "tag") == ["tag"]
+
+
+def test_split_front_matter() -> None:
+    content = "---\ntitle: Foo\ntags:\n- bar\n---\n# Body\n"
+    header, body = split_front_matter(content)
+    assert header == {"title": "Foo", "tags": ["bar"]}
+    assert body == "# Body\n"
+
+
+def test_split_front_matter_without_yaml() -> None:
+    content = "# Just markdown"
+    assert split_front_matter(content) == (None, content)
+
+
+def test_process_categories_rewrites_links() -> None:
+    wikicode = mwparserfromhell.parse("Article text [[Category:Characters]] end")
+    wikicode, tags = process_categories(wikicode)
+    assert tags == ["Characters"]
+    assert str(wikicode) == "Article text [[Category Characters]] end"
+
+
+def test_process_categories_normalizes_tag_names() -> None:
+    wikicode = mwparserfromhell.parse("[[Category:Main Characters]]")
+    wikicode, tags = process_categories(wikicode)
+    assert tags == ["Main_Characters"]
+    assert str(wikicode) == "[[Category Main Characters]]"
+
+
+def test_create_tag_indexes_writes_new_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(convert, "OUTPUT_DIR", str(tmp_path))
+    convert.tag_to_pages.clear()
+    convert.tag_to_pages["Characters"] = ["Aragorn", "Legolas"]
+
+    create_tag_indexes()
+
+    filepath = tmp_path / "categories" / "Category Characters.md"
+    assert filepath.exists()
+    content = filepath.read_text(encoding="utf-8")
+    assert "Index: Characters" in content
+    assert "- Characters" in content
+    assert "- [[Aragorn]]" in content
+    assert "- [[Legolas]]" in content
+    assert "# Characters Index" in content
+
+
+def test_create_tag_indexes_merges_existing_category_page(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(convert, "OUTPUT_DIR", str(tmp_path))
+    category_dir = tmp_path / "categories"
+    category_dir.mkdir()
+    existing = """---
+title: Category Characters
+tags:
+- existing_tag
+source/url: https://example.com/wiki/Category:Characters
+---
+Original category page content.
+"""
+    filepath = category_dir / "Category Characters.md"
+    filepath.write_text(existing, encoding="utf-8")
+
+    convert.tag_to_pages.clear()
+    convert.tag_to_pages["Characters"] = ["Aragorn"]
+
+    create_tag_indexes()
+
+    content = filepath.read_text(encoding="utf-8")
+    assert "Original category page content." in content
+    assert "source/url: https://example.com/wiki/Category:Characters" in content
+    assert "- existing_tag" in content
+    assert "- Characters" in content
+    assert "title: Category Characters" in content
+    assert "# Characters Index" in content
+    assert "- [[Aragorn]]" in content

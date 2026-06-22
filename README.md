@@ -2,20 +2,17 @@
 
 This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, Obsidian callouts from wiki templates, YAML frontmatter for titles and tags, and provenance fields linking each page back to the original wiki.
 
-🧭 If you're looking for a worldbuilding tool to connect your ideas, check out my app [Chronicler](https://chronicler.pro/) (source available [here](https://github.com/mak-kirkland/chronicler))
-
-🗂️ If you want to organize your vault into folders based on tags, check out my [Markdown Vault Organizer](https://github.com/mak-kirkland/markdown-vault-organizer).
-
 ## ✨ Features
 
 - ✅ Converts MediaWiki pages to Obsidian-compatible Markdown
-- 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[Index …]]` pages
+- 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[Category …]]` pages
 - 📋 Adds YAML `source/*` fields on each page — wiki generator, site URL, page URL, and revision date
 - 📦 Converts all `{{templates}}` into Obsidian callout blocks in place (infoboxes, navboxes, etc.)
 - 📄 On `Template:` namespace pages, preserves the original wikitext in a reference source block
+- 📂 Writes `Category:` namespace pages under `categories/` (e.g. `Category Characters.md`)
 - 🖼️ Downloads and embeds images as `![[images/Filename]]` (supports `File:`, `Image:`, and `Media:` links)
 - 🔗 Converts internal links to Obsidian-safe `[[Wikilinks]]` via Pandoc post-processing
-- 📚 Automatically generates tag-based index files under `indexes/` (e.g. `Index Characters.md`)
+- 📚 Automatically generates tag-based category index files under `categories/` (e.g. `Category Characters.md`), merging with exported category pages when both exist
 - 🐢 Uses Pandoc for wikitext-to-Markdown conversion when available (recommended; falls back to raw wikitext on failure)
 - ⏭️ Optional `--pandoc-skip` flag to bypass Pandoc conversion entirely and keep raw wikitext
 - 📝 Optional `--pandoc-plain-markdown` flag to preserve raw HTML via Pandoc's `raw_attribute` writer (see below)
@@ -24,10 +21,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 
 ## Support
 
-If you find this script useful, please consider supporting me on Patreon:
-
-☕️ [Buy Me a Coffee](https://buymeacoffee.com/chronicler)
-❤️ [Support on Patreon](https://patreon.com/MichaelKirkland)
+...
 
 ---
 
@@ -360,9 +354,9 @@ python convert.py wiki-dump.xml --cookies "sessionid=abc123; csrftoken=xyz789"
 
 ```text
 obsidian_vault/
-├── indexes/
-│   ├── Index Characters.md
-│   ├── Index Locations.md
+├── categories/
+│   ├── Category Characters.md
+│   ├── Category Locations.md
 │   └── ...
 ├── images/
 │   ├── Example.jpg
@@ -371,6 +365,8 @@ obsidian_vault/
 ├── Page_Title_2.md
 └── ...
 ```
+
+Main article pages live at the vault root. Exported `Category:` namespace pages and auto-generated tag indexes both live under `categories/`. When a wiki category page and a generated index target the same filename, the converter keeps the category page content, merges the index tag into the existing YAML `tags`, and appends a member list to the body.
 
 Each converted page includes YAML frontmatter with `title`, `tags`, and source provenance read from the XML export:
 
@@ -391,7 +387,7 @@ source/date: '2024-06-18T10:30:00Z'
 | `source/url`  | `<base>` + page title | Direct link to that page on the wiki |
 | `source/date` | `<timestamp>` on the revision used | UTC date of the exported revision (ISO 8601) |
 
-Index pages under `indexes/` only include `title` and `tags` — they are generated locally, not imported from the wiki.
+Index pages under `categories/` include `title` and `tags` in YAML frontmatter. If the file already exists (from an exported `Category:` page), existing `tags` are expanded rather than replaced, and the index section is appended below the page content. Standalone indexes only include `title` and `tags` — they are generated locally, not imported from the wiki.
 
 Wiki templates render as Obsidian callouts in place — wherever the template appeared in the original wikitext:
 
@@ -402,8 +398,8 @@ Wiki templates render as Obsidian callouts in place — wherever the template ap
 > - **image**: ![[images/Aragorn.jpg]]
 ```
 
-Category wikilinks in the body become links to the matching index page (e.g. `[[Index Characters]]` → `indexes/Index Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference.
+Category wikilinks in the body become links to the matching category page (e.g. `[[Category Characters]]` → `categories/Category Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference. Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`).
 
 ## 👤 Author
 
-Created by Michael Kirkland
+Original idea by Michael Kirkland, expanded by Felipe Caballero.
