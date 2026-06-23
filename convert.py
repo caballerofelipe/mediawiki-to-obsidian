@@ -29,6 +29,7 @@ FILE_DIR = "files_metadata"
 INPUT_XML: str = None
 OUTPUT_DIR: str = None
 SKIP_REDIRECTS: bool = None
+SKIP_TEMPLATES: bool = None
 NO_SOURCE_FIELDS: bool = None
 PANDOC_SKIP: bool = None
 PANDOC_TO_FORMAT: str = None
@@ -51,6 +52,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("input_xml", help="Input XML file")
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
+    parser.add_argument(
+        "--include-templates",
+        action="store_true",
+        help="Convert Template: namespace pages (skipped by default)",
+    )
     parser.add_argument(
         "--no-source-fields",
         action="store_true",
@@ -76,7 +82,7 @@ def config() -> Optional[ET.ElementTree]:
     """Parse CLI args, initialize globals, parse XML, and return the element tree."""
     args = parse_args()
 
-    global INPUT_XML, OUTPUT_DIR, SKIP_REDIRECTS, NO_SOURCE_FIELDS, PANDOC_SKIP
+    global INPUT_XML, OUTPUT_DIR, SKIP_REDIRECTS, SKIP_TEMPLATES, NO_SOURCE_FIELDS, PANDOC_SKIP
     global PANDOC_TO_FORMAT, COOKIES, PANDOC_AVAILABLE, USE_PANDOC
     global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME
 
@@ -90,6 +96,7 @@ def config() -> Optional[ET.ElementTree]:
     INPUT_XML = args.input_xml
     OUTPUT_DIR = args.output_dir
     SKIP_REDIRECTS = args.skip_redirects
+    SKIP_TEMPLATES = not args.include_templates
     NO_SOURCE_FIELDS = args.no_source_fields
     PANDOC_SKIP = args.pandoc_skip
     PANDOC_TO_FORMAT = "markdown" if args.pandoc_plain_markdown else "markdown-raw_attribute"
@@ -630,11 +637,19 @@ def convert_pages(tree: ET.ElementTree) -> None:
                 continue
 
             if SKIP_REDIRECTS and (page.find("ns:redirect", ns) is not None):
-                logging.debug(f"⏭️ Skipping redirect: {title_elem.text.strip()}")
+                logging.info(f"⏭️ Skipping redirect: {title_elem.text.strip()}")
                 pbar.update(1)
                 continue
 
             title = original_title = title_elem.text.strip()
+
+            if SKIP_TEMPLATES and title.lower().startswith('template:'):
+                logging.debug(f"⏭️ Skipping template: {title}")
+                pbar.update(1)
+                continue
+            elif not SKIP_TEMPLATES and title.lower().startswith('template:'):
+                logging.info(f"▶️ Not skipping template: {title}")
+
             logging.debug(f"✅ Found page: {title}")
 
             latest_revision = None
@@ -657,7 +672,7 @@ def convert_pages(tree: ET.ElementTree) -> None:
 
             text_elem = latest_revision.find(TAG("text"))
             if text_elem is None or not text_elem.text or not text_elem.text.strip():
-                logging.warning(f"⚠️ No content in: {title}")
+                logging.debug(f"⚠️ No content in: {title}")
                 pbar.update(1)
                 continue
 
@@ -766,7 +781,7 @@ def create_tag_indexes() -> None:
             yaml_header = build_yaml_header(tag)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(yaml_header + index_content + "\n")
-    logging.info(f"📚 Index pages created under {CATEGORY_DIR}/ with tag references")
+    logging.debug(f"📚 Index pages created under {CATEGORY_DIR}/ with tag references")
 
 
 def main() -> None:

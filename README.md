@@ -8,9 +8,9 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[categories/Category …|Category …]]` pages
 - 📋 Adds YAML `source/*` fields on each page — wiki generator, site URL, page URL, and revision date (optional; pass `--no-source-fields` to omit)
 - 📦 Converts all `{{templates}}` into Obsidian callout blocks in place (infoboxes, navboxes, etc.)
-- 📄 On `Template:` namespace pages, preserves the original wikitext in a reference source block
+- ⏭️ Skips `Template:` namespace pages by default (pass `--include-templates` to export them, with original wikitext preserved in a reference source block)
 - 📂 Writes `Category:` namespace pages under `categories/` (e.g. `Category Characters.md`)
-- 📁 Writes `File:` namespace description pages under `files metadata/` (e.g. `File Example.jpg.md`), with an embedded preview of the upload and the wiki's file metadata
+- 📁 Writes `File:` namespace description pages under `files_metadata/` (e.g. `File Example.jpg.md`), with an embedded preview of the upload and the wiki's file metadata
 - 🖼️ Downloads and embeds images as `![[images/Filename]]` (supports `File:`, `Image:`, and `Media:` links)
 - 🔗 Converts internal links to Obsidian-safe `[[Wikilinks]]` via Pandoc post-processing
 - 📚 Automatically generates tag-based category index files under `categories/` (e.g. `Category Characters.md`), merging with exported category pages when both exist
@@ -292,7 +292,7 @@ See [Help:Export](https://www.mediawiki.org/wiki/Help:Export) and [Parameters to
 ## 🚀 Usage
 
 ```bash
-python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--no-source-fields] [--pandoc-skip] [--pandoc-plain-markdown] [--verbose] [--cookies COOKIES]
+python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--include-templates] [--no-source-fields] [--pandoc-skip] [--pandoc-plain-markdown] [--verbose] [--cookies COOKIES]
 ```
 
 | Argument                  | Description                                                                 |
@@ -300,11 +300,24 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--no-source-fields]
 | `INPUT_XML`               | Path to your MediaWiki XML dump                                             |
 | `OUTPUT_DIR`              | Optional output folder (default: `obsidian_vault/`)                          |
 | `--skip-redirects`        | Ignore redirect pages                                                       |
+| `--include-templates`     | Export `Template:` namespace pages (skipped by default)                     |
 | `--no-source-fields`      | Omit YAML `source/*` provenance fields from frontmatter                     |
 | `--pandoc-skip`           | Skip Pandoc conversion and wikilink cleanup, even if Pandoc is installed     |
 | `--pandoc-plain-markdown` | Use Pandoc `--to=markdown` instead of the default `--to=markdown-raw_attribute` |
 | `--verbose`               | Enable verbose logging (disables progress bar)                              |
 | `--cookies`               | Cookie header for authenticated API/image requests (see below)              |
+
+### Template namespace pages (`--include-templates`)
+
+`Template:` namespace pages are documentation for wiki templates — they are not the same as `{{template}}` invocations in article bodies. Inline templates are always converted to Obsidian callouts regardless of this flag.
+
+By default, `Template:` pages are **not** written to the vault. This keeps the output focused on readable content and avoids hundreds of boilerplate template-definition files. Pass `--include-templates` when you need those pages (for example, to satisfy `[[Template:…]]` wikilinks or to keep the raw template source alongside converted articles):
+
+```bash
+python convert.py wiki-dump.xml --include-templates
+```
+
+When included, each `Template:` page is written at the vault root (e.g. `Template_Infobox character.md`) with the original MediaWiki wikitext preserved in a `<source>` reference block.
 
 ### Skipping Pandoc (`--pandoc-skip`)
 
@@ -360,7 +373,7 @@ obsidian_vault/
 │   ├── Category Characters.md
 │   ├── Category Locations.md
 │   └── ...
-├── files metadata/
+├── files_metadata/
 │   ├── File Example.jpg.md
 │   └── ...
 ├── images/
@@ -373,7 +386,7 @@ obsidian_vault/
 
 Main article pages live at the vault root. Exported `Category:` namespace pages and auto-generated tag indexes both live under `categories/`. When a wiki category page and a generated index target the same filename, the converter keeps the category page content, merges the index tag into the existing YAML `tags`, and appends a member list to the body.
 
-Exported `File:` namespace pages live under `files metadata/`. Each page includes a **File** section with an Obsidian embed of the uploaded file (`![[images/...]]`) and a **Metadata** section with the original file description from the wiki. Include namespace `6` in your XML export when you want these description pages alongside the downloaded binaries in `images/`.
+Exported `File:` namespace pages live under `files_metadata/`. Each page includes a **File** section with an Obsidian embed of the uploaded file (`![[images/...]]`) and a **Metadata** section with the original file description from the wiki. Include namespace `6` in your XML export when you want these description pages alongside the downloaded binaries in `images/`.
 
 Each converted page includes YAML frontmatter with `tags` and source provenance read from the XML export (omit provenance with `--no-source-fields`):
 
@@ -404,8 +417,8 @@ Wiki templates render as Obsidian callouts in place — wherever the template ap
 > - **image**: ![[images/Aragorn.jpg]]
 ```
 
-Category wikilinks in the body become piped links to the matching category page (e.g. `[[Category:Characters]]` → `[[categories/Category Characters|Category Characters]]` → `categories/Category Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference. Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`). Exported `File:` pages follow the same pattern under `files metadata/` (e.g. `File:Example.jpg` → `files metadata/File Example.jpg.md`).
+Category wikilinks in the body become piped links to the matching category page (e.g. `[[Category:Characters]]` → `[[categories/Category Characters|Category Characters]]` → `categories/Category Characters.md`). Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`). Exported `File:` pages follow the same pattern under `files_metadata/` (e.g. `File:Example.jpg` → `files_metadata/File Example.jpg.md`). `Template:` namespace pages are omitted unless you pass `--include-templates`; when included, each page also preserves the original MediaWiki source in a reference block.
 
 ## 👤 Author
 
-Original idea by Michael Kirkland, expanded by Felipe Caballero.
+Felipe Caballero (Original idea by Michael Kirkland).
