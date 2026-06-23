@@ -663,16 +663,16 @@ def convert_pages(tree: ET.ElementTree) -> None:
 
             raw_text = ''
 
-            if title.startswith('Template:'):
+            if title.lower().startswith('template:'):
                 # Add the original source to the file if it's a Template
                 # Used for reference because the template will be changed completely
                 # Because template invocations are converted to callouts in article wikitext
                 raw_text += wrap_original_mediawiki_source(text_elem.text)
-            if title.startswith('Category:'):
-                title = re.sub('^Category:', 'Category ', title)
+            if title.lower().startswith('category:'):
+                title = re.sub('^category:', 'category ', title, flags=re.IGNORECASE)
                 page_subdir = CATEGORY_DIR
-            if title.startswith('File:'):
-                title = re.sub('^File:', 'File ', original_title)
+            if title.lower().startswith('file:'):
+                title = re.sub('^file:', 'file ', original_title, flags=re.IGNORECASE)
                 page_subdir = FILE_DIR
                 # Add the file to be viewed inside this metadata file
                 # The link will be processed inside prepare_wikitext like original links
@@ -728,8 +728,8 @@ def create_tag_indexes() -> None:
         display_tag = tag
         index_lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages, key=sort_key_without_diacritics):
-            if page.startswith('Category:'):
-                page = re.sub('^Category:', 'Category ', page)
+            if page.lower().startswith('category:'):
+                page = re.sub('^category:', 'category ', page, flags=re.IGNORECASE)
                 display_page = clean_filename(page)
                 index_lines.append(f"- [[{CATEGORY_DIR}/{display_page}|{display_page}]]")
             else:
