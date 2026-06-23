@@ -88,9 +88,7 @@ def test_build_mediawiki_page_url_index_php() -> None:
     )
 
 
-def test_extract_wiki_url_reads_generator() -> None:
-    import xml.etree.ElementTree as ET
-
+def test_config_reads_wiki_metadata(tmp_path, monkeypatch) -> None:
     xml = """<?xml version="1.0"?>
 <mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/">
   <siteinfo>
@@ -99,12 +97,42 @@ def test_extract_wiki_url_reads_generator() -> None:
     <sitename>Wikipedia</sitename>
   </siteinfo>
 </mediawiki>"""
-    tree = ET.ElementTree(ET.fromstring(xml))
-    wiki_url, base_url, generator, sitename = convert.extract_wiki_url(tree)
-    assert wiki_url == "https://en.wikipedia.org"
-    assert base_url == "https://en.wikipedia.org/wiki/Main_Page"
-    assert generator == "MediaWiki 1.41.0"
-    assert sitename == "Wikipedia"
+    xml_file = tmp_path / "wiki.xml"
+    xml_file.write_text(xml, encoding="utf-8")
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["test.py", str(xml_file), str(out_dir), "--pandoc-skip"],
+    )
+
+    tree = convert.config()
+
+    assert tree is not None
+    assert convert.WIKI_URL == "https://en.wikipedia.org"
+    assert convert.WIKI_BASE_URL == "https://en.wikipedia.org/wiki/Main_Page"
+    assert convert.WIKI_GENERATOR == "MediaWiki 1.41.0"
+    assert convert.WIKI_NAME == "Wikipedia"
+    assert convert.OUTPUT_DIR == str(out_dir)
+    assert out_dir.is_dir()
+
+
+def test_config_raises_when_base_missing(tmp_path, monkeypatch) -> None:
+    xml = """<?xml version="1.0"?>
+<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/">
+  <siteinfo>
+    <generator>MediaWiki 1.41.0</generator>
+    <sitename>Wikipedia</sitename>
+  </siteinfo>
+</mediawiki>"""
+    xml_file = tmp_path / "wiki.xml"
+    xml_file.write_text(xml, encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["test.py", str(xml_file), "--pandoc-skip"])
+
+    import pytest
+
+    with pytest.raises(ValueError, match="Could not extract wiki domain"):
+        convert.config()
 
 
 # ***************

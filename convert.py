@@ -26,10 +26,22 @@ IMAGE_DIR = "images"
 CATEGORY_DIR = "categories"
 FILE_DIR = "files metadata"
 
+INPUT_XML: str = None
+OUTPUT_DIR: str = None
+SKIP_REDIRECTS: bool = None
+PANDOC_SKIP: bool = None
+PANDOC_TO_FORMAT: str = None
+COOKIES: Optional[str] = None
+PANDOC_AVAILABLE: bool = None
+USE_PANDOC: bool = None
+WIKI_URL: Optional[str] = None
+WIKI_BASE_URL: Optional[str] = None
+WIKI_GENERATOR: Optional[str] = None
+WIKI_NAME: Optional[str] = None
 
-def TAG(t: str) -> str:
-    """Return the MediaWiki XML namespace-qualified tag name for element ``t``."""
-    return f"{{{NS}}}{t}"
+tag_to_pages: DefaultDict[str, List[str]] = defaultdict(list)
+filename_counts: DefaultDict[str, int] = defaultdict(int)
+downloaded_images_local_filename: Dict[str, Optional[str]] = {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,43 +66,48 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-args: argparse.Namespace = parse_args()
+def config() -> Optional[ET.ElementTree]:
+    """Parse CLI args, initialize globals, parse XML, and return the element tree."""
+    args = parse_args()
 
-logging.basicConfig(
-    level=logging.DEBUG if args.verbose else logging.INFO,
-    format='%(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+    global INPUT_XML, OUTPUT_DIR, SKIP_REDIRECTS, PANDOC_SKIP
+    global PANDOC_TO_FORMAT, COOKIES, PANDOC_AVAILABLE, USE_PANDOC
+    global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME
 
-INPUT_XML: str = args.input_xml
-OUTPUT_DIR: str = args.output_dir
-SKIP_REDIRECTS: bool = args.skip_redirects
-PANDOC_SKIP: bool = args.pandoc_skip
-PANDOC_TO_FORMAT: str = "markdown" if args.pandoc_plain_markdown else "markdown-raw_attribute"
-COOKIES: Optional[str] = args.cookies
-PANDOC_AVAILABLE: bool = shutil.which("pandoc") is not None
-USE_PANDOC: bool = not PANDOC_SKIP and PANDOC_AVAILABLE
-
-if not PANDOC_SKIP and not PANDOC_AVAILABLE:
-    logging.warning(
-        "⚠️ Pandoc not found on PATH. Wikitext will be kept as-is. "
-        "Install Pandoc (https://pandoc.org/installing.html) or pass --pandoc-skip."
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format='%(message)s',
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # Setting global variables
+    INPUT_XML = args.input_xml
+    OUTPUT_DIR = args.output_dir
+    SKIP_REDIRECTS = args.skip_redirects
+    PANDOC_SKIP = args.pandoc_skip
+    PANDOC_TO_FORMAT = "markdown" if args.pandoc_plain_markdown else "markdown-raw_attribute"
+    COOKIES = args.cookies
+    PANDOC_AVAILABLE = shutil.which("pandoc") is not None
+    USE_PANDOC = not PANDOC_SKIP and PANDOC_AVAILABLE
 
-tag_to_pages: DefaultDict[str, List[str]] = defaultdict(list)
-filename_counts: DefaultDict[str, int] = defaultdict(int)
-downloaded_images_local_filename: Dict[str, Optional[str]] = {}
+    if not PANDOC_SKIP and not PANDOC_AVAILABLE:
+        logging.warning(
+            "⚠️ Pandoc not found on PATH. Wikitext will be kept as-is. "
+            "Install Pandoc (https://pandoc.org/installing.html) or pass --pandoc-skip."
+        )
 
-WIKI_URL: Optional[str] = None
-WIKI_BASE_URL: Optional[str] = None
-WIKI_GENERATOR: Optional[str] = None
-WIKI_NAME: Optional[str] = None
+    # Creating the output dir
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    # Parse XML
+    logging.info("🔄 Converting MediaWiki XML to Obsidian Vault...")
+    try:
+        tree = ET.parse(INPUT_XML)
+    except ET.ParseError as e:
+        logging.error(f"‼️ Failed to parse XML: {e}")
+        return
 
-def extract_wiki_url(tree: ET.ElementTree) -> Tuple[str, str, str, str]:
-    """Extract wiki host URL, base page URL, generator, and site name from a MediaWiki XML export."""
+    # Obtain WIKI variables
     ns = {"ns": NS}
     siteinfo = tree.find(".//ns:siteinfo", ns)
     if siteinfo is None:
@@ -113,8 +130,19 @@ def extract_wiki_url(tree: ET.ElementTree) -> Tuple[str, str, str, str]:
             sitename = urlparse(base_url).netloc
         match = re.match(r"(https?://[^/]+)/", base_url)
         if match:
-            return match.group(1), base_url, generator, sitename
+            WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME = (
+                match.group(1),
+                base_url,
+                generator,
+                sitename,
+            )
+            return tree
     raise ValueError("Could not extract wiki domain from <base> tag.")
+
+
+def TAG(t: str) -> str:
+    """Return the MediaWiki XML namespace-qualified tag name for element ``t``."""
+    return f"{{{NS}}}{t}"
 
 
 def build_mediawiki_page_url(page_title: str) -> str:
@@ -734,17 +762,10 @@ def create_tag_indexes() -> None:
 
 
 def main() -> None:
-    """Parse XML, convert pages, and create tag index pages."""
-    logging.info("🔄 Converting MediaWiki XML to Obsidian Vault...")
     try:
-        tree = ET.parse(INPUT_XML)
-    except ET.ParseError as e:
-        logging.error(f"‼️ Failed to parse XML: {e}")
-        return
-
-    try:
-        global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME
-        WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME = extract_wiki_url(tree)
+        tree = config()
+        if tree is None:
+            raise ValueError('Tree is None.')
     except ValueError as e:
         logging.error(f"‼️ {e}")
         return
