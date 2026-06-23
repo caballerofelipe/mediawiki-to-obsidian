@@ -6,7 +6,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 
 - ✅ Converts MediaWiki pages to Obsidian-compatible Markdown
 - 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[categories/Category …|Category …]]` pages
-- 📋 Adds YAML `source/*` fields on each page — wiki generator, site URL, page URL, and revision date
+- 📋 Adds YAML `source/*` fields on each page — wiki generator, site URL, page URL, and revision date (optional; pass `--no-source-fields` to omit)
 - 📦 Converts all `{{templates}}` into Obsidian callout blocks in place (infoboxes, navboxes, etc.)
 - 📄 On `Template:` namespace pages, preserves the original wikitext in a reference source block
 - 📂 Writes `Category:` namespace pages under `categories/` (e.g. `Category Characters.md`)
@@ -292,7 +292,7 @@ See [Help:Export](https://www.mediawiki.org/wiki/Help:Export) and [Parameters to
 ## 🚀 Usage
 
 ```bash
-python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--pandoc-skip] [--pandoc-plain-markdown] [--verbose] [--cookies COOKIES]
+python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--no-source-fields] [--pandoc-skip] [--pandoc-plain-markdown] [--verbose] [--cookies COOKIES]
 ```
 
 | Argument                  | Description                                                                 |
@@ -300,6 +300,7 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--pandoc-skip] [--p
 | `INPUT_XML`               | Path to your MediaWiki XML dump                                             |
 | `OUTPUT_DIR`              | Optional output folder (default: `obsidian_vault/`)                          |
 | `--skip-redirects`        | Ignore redirect pages                                                       |
+| `--no-source-fields`      | Omit YAML `source/*` provenance fields from frontmatter                     |
 | `--pandoc-skip`           | Skip Pandoc conversion and wikilink cleanup, even if Pandoc is installed     |
 | `--pandoc-plain-markdown` | Use Pandoc `--to=markdown` instead of the default `--to=markdown-raw_attribute` |
 | `--verbose`               | Enable verbose logging (disables progress bar)                              |
@@ -374,7 +375,7 @@ Main article pages live at the vault root. Exported `Category:` namespace pages 
 
 Exported `File:` namespace pages live under `files metadata/`. Each page includes a **File** section with an Obsidian embed of the uploaded file (`![[images/...]]`) and a **Metadata** section with the original file description from the wiki. Include namespace `6` in your XML export when you want these description pages alongside the downloaded binaries in `images/`.
 
-Each converted page includes YAML frontmatter with `title`, `tags`, and source provenance read from the XML export:
+Each converted page includes YAML frontmatter with `title`, `tags`, and source provenance read from the XML export (omit provenance with `--no-source-fields`):
 
 ```yaml
 ---

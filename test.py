@@ -17,6 +17,7 @@ from convert import (
     fix_links_from_pandoc,
     merge_tags,
     prep_wikilinks_download_files_and_get_categories,
+    prepare_wikitext,
     split_front_matter,
     transform_templates_to_callouts,
 )
@@ -154,6 +155,13 @@ def test_build_yaml_header_with_source() -> None:
     assert "source/date: '2024-06-18T10:30:00Z'" in yaml
 
 
+def test_prepare_wikitext_omits_source_fields_when_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(convert, "NO_SOURCE_FIELDS", True)
+    yaml_header, _, _ = prepare_wikitext("Page body [[Category:Characters]]", "Sample Page")
+    assert "title: Sample Page" in yaml_header
+    assert "source/" not in yaml_header
+
+
 # ***************
 # Template to callout conversion
 def test_transform_templates_to_callouts(monkeypatch) -> None:
@@ -273,6 +281,33 @@ Original category page content.
     assert "- Characters" in content
     assert "title: Category Characters" in content
     assert "# Characters Index" in content
+    assert "- [[Aragorn]]" in content
+
+
+def test_create_tag_indexes_strips_source_fields_when_disabled(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(convert, "OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(convert, "NO_SOURCE_FIELDS", True)
+    category_dir = tmp_path / "categories"
+    category_dir.mkdir()
+    existing = """---
+title: Category Characters
+tags:
+- existing_tag
+source/url: https://example.com/wiki/Category:Characters
+---
+Original category page content.
+"""
+    filepath = category_dir / "Category Characters.md"
+    filepath.write_text(existing, encoding="utf-8")
+
+    convert.tag_to_pages.clear()
+    convert.tag_to_pages["Characters"] = ["Aragorn"]
+
+    create_tag_indexes()
+
+    content = filepath.read_text(encoding="utf-8")
+    assert "source/url" not in content
+    assert "Original category page content." in content
     assert "- [[Aragorn]]" in content
 
 

@@ -29,6 +29,7 @@ FILE_DIR = "files metadata"
 INPUT_XML: str = None
 OUTPUT_DIR: str = None
 SKIP_REDIRECTS: bool = None
+NO_SOURCE_FIELDS: bool = None
 PANDOC_SKIP: bool = None
 PANDOC_TO_FORMAT: str = None
 COOKIES: Optional[str] = None
@@ -51,6 +52,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
     parser.add_argument(
+        "--no-source-fields",
+        action="store_true",
+        help="Omit YAML source/* provenance fields from frontmatter",
+    )
+    parser.add_argument(
         "--pandoc-skip", action="store_true", help="Skip Pandoc conversion even if available"
     )
     parser.add_argument(
@@ -70,7 +76,7 @@ def config() -> Optional[ET.ElementTree]:
     """Parse CLI args, initialize globals, parse XML, and return the element tree."""
     args = parse_args()
 
-    global INPUT_XML, OUTPUT_DIR, SKIP_REDIRECTS, PANDOC_SKIP
+    global INPUT_XML, OUTPUT_DIR, SKIP_REDIRECTS, NO_SOURCE_FIELDS, PANDOC_SKIP
     global PANDOC_TO_FORMAT, COOKIES, PANDOC_AVAILABLE, USE_PANDOC
     global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME
 
@@ -84,6 +90,7 @@ def config() -> Optional[ET.ElementTree]:
     INPUT_XML = args.input_xml
     OUTPUT_DIR = args.output_dir
     SKIP_REDIRECTS = args.skip_redirects
+    NO_SOURCE_FIELDS = args.no_source_fields
     PANDOC_SKIP = args.pandoc_skip
     PANDOC_TO_FORMAT = "markdown" if args.pandoc_plain_markdown else "markdown-raw_attribute"
     COOKIES = args.cookies
@@ -591,9 +598,8 @@ def prepare_wikitext(
     wikicode = transform_templates_to_callouts(wikicode)
 
     cleaned_text = str(wikicode).strip()
-    yaml_header = build_yaml_header(
-        original_title, tags, extra_fields=build_source_fields(original_title, revision_date)
-    )
+    source_fields = None if NO_SOURCE_FIELDS else build_source_fields(original_title, revision_date)
+    yaml_header = build_yaml_header(original_title, tags, extra_fields=source_fields)
 
     # Track tags for index
     for tag in tags:
@@ -740,6 +746,10 @@ def create_tag_indexes() -> None:
                 merged_tags = merge_tags(header.get("tags"), tag)
                 title = header.get("title", f"Index: {display_tag}")
                 extra_fields = {k: v for k, v in header.items() if k not in ("title", "tags")}
+                if NO_SOURCE_FIELDS:
+                    extra_fields = {
+                        k: v for k, v in extra_fields.items() if not str(k).startswith("source/")
+                    }
                 yaml_header = build_yaml_header(
                     title, merged_tags, extra_fields=extra_fields or None
                 )
