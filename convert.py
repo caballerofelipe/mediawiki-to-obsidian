@@ -574,13 +574,12 @@ def convert_with_pandoc(text: str, title: str = "") -> str:
         md = result.stdout.decode("utf-8")
         md = md.replace("\\'", "'")
         return md
-    except subprocess.CalledProcessError as e:
-        logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
+    except Exception as e:
+        logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text (--verbose for more info).")
         logging.debug(e.stderr.decode())
-        return text
-    except OSError as e:
-        logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
-        logging.debug(e)
+        logging.debug('='*30)
+        logging.debug(text)
+        logging.debug('='*30)
         return text
 
 
