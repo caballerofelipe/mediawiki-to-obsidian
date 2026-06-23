@@ -577,9 +577,9 @@ def convert_with_pandoc(text: str, title: str = "") -> str:
     except Exception as e:
         logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text (--verbose for more info).")
         logging.debug(e.stderr.decode())
-        logging.debug('='*30)
+        logging.debug('=' * 30)
         logging.debug(text)
-        logging.debug('='*30)
+        logging.debug('=' * 30)
         return text
 
 
@@ -720,8 +720,6 @@ def convert_pages(tree: ET.ElementTree) -> None:
 
             pbar.update(1)
 
-    logging.info("✅ Main articles converted")
-
 
 def create_tag_indexes() -> None:
     """Write Obsidian index pages for each collected tag.
@@ -762,9 +760,7 @@ def create_tag_indexes() -> None:
                     extra_fields = {
                         k: v for k, v in extra_fields.items() if not str(k).startswith("source/")
                     }
-                yaml_header = build_yaml_header(
-                    merged_tags, extra_fields=extra_fields or None
-                )
+                yaml_header = build_yaml_header(merged_tags, extra_fields=extra_fields or None)
             else:
                 yaml_header = build_yaml_header(tag)
 
