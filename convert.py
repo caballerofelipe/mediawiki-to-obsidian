@@ -24,7 +24,7 @@ import yaml
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 IMAGE_DIR = "images"
 CATEGORY_DIR = "categories"
-FILE_DIR = "files metadata"
+FILE_DIR = "files_metadata"
 
 INPUT_XML: str = None
 OUTPUT_DIR: str = None
