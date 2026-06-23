@@ -425,4 +425,4 @@ Category wikilinks in the body become piped links to the matching category page 
 
 ## 👤 Author
 
-Felipe Caballero (Original idea by Michael Kirkland).
+Felipe Caballero ([Original idea by Michael Kirkland](https://github.com/mak-kirkland/mediawiki-to-markdown)).
