@@ -1,6 +1,6 @@
 # MediaWiki to Markdown Vault Converter 🧭
 
-This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, Obsidian callouts from wiki templates, YAML frontmatter for titles and tags, and provenance fields linking each page back to the original wiki.
+This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, Obsidian callouts from wiki templates, YAML frontmatter for tags, and provenance fields linking each page back to the original wiki.
 
 ## ✨ Features
 
@@ -41,7 +41,7 @@ Python dependencies are listed in `requirements.txt`. All packages use pinned ve
 | ------------------ | -------------------------------------- |
 | `mwparserfromhell` | Parse and manipulate wikitext          |
 | `requests`         | Download images from the wiki API      |
-| `pyyaml`           | Generate YAML frontmatter (title, tags, source) |
+| `pyyaml`           | Generate YAML frontmatter (tags, source) |
 | `tqdm`             | Progress bar during conversion         |
 
 ## 🛠️ Installation
@@ -308,7 +308,7 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--no-source-fields]
 
 ### Skipping Pandoc (`--pandoc-skip`)
 
-Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, template callouts, images, YAML frontmatter (title, tags, and source fields), and image downloads are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
+Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, template callouts, images, YAML frontmatter (tags and source fields), and image downloads are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
 
 ```bash
 python convert.py wiki-dump.xml --pandoc-skip
@@ -375,11 +375,10 @@ Main article pages live at the vault root. Exported `Category:` namespace pages 
 
 Exported `File:` namespace pages live under `files metadata/`. Each page includes a **File** section with an Obsidian embed of the uploaded file (`![[images/...]]`) and a **Metadata** section with the original file description from the wiki. Include namespace `6` in your XML export when you want these description pages alongside the downloaded binaries in `images/`.
 
-Each converted page includes YAML frontmatter with `title`, `tags`, and source provenance read from the XML export (omit provenance with `--no-source-fields`):
+Each converted page includes YAML frontmatter with `tags` and source provenance read from the XML export (omit provenance with `--no-source-fields`):
 
 ```yaml
 ---
-title: Aragorn
 tags:
   - Characters
 source/note: Imported from MediaWiki 1.41.0 website @ https://your-wiki.example
@@ -394,7 +393,7 @@ source/date: '2024-06-18T10:30:00Z'
 | `source/url`  | `<base>` + page title | Direct link to that page on the wiki |
 | `source/date` | `<timestamp>` on the revision used | UTC date of the exported revision (ISO 8601) |
 
-Index pages under `categories/` include `title` and `tags` in YAML frontmatter. If the file already exists (from an exported `Category:` page), existing `tags` are expanded rather than replaced, and the index section is appended below the page content. Standalone indexes only include `title` and `tags` — they are generated locally, not imported from the wiki.
+Index pages under `categories/` include `tags` in YAML frontmatter. If the file already exists (from an exported `Category:` page), existing `tags` are expanded rather than replaced, and the index section is appended below the page content. Standalone indexes only include `tags` — they are generated locally, not imported from the wiki.
 
 Wiki templates render as Obsidian callouts in place — wherever the template appeared in the original wikitext:
 

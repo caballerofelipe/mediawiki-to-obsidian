@@ -60,11 +60,9 @@ def test_fix_links_from_pandoc_external(monkeypatch) -> None:
 # ***************
 # YAML front matter
 def test_build_yaml_header_basic() -> None:
-    title = "Sample_Page Title"
     tags = ["category_one", "tag_two"]
-    yaml = build_yaml_header(title, tags)
+    yaml = build_yaml_header(tags)
     assert "---" in yaml
-    assert "title: Sample_Page Title" in yaml  # page title is written verbatim to YAML
     assert "tags:" in yaml
     assert "- category_one" in yaml
     assert "- tag_two" in yaml
@@ -144,7 +142,6 @@ def test_build_yaml_header_with_source() -> None:
     convert.WIKI_GENERATOR = "MediaWiki 1.41.0"
     convert.WIKI_NAME = "Example Wiki"
     yaml = build_yaml_header(
-        "Sample Page",
         ["tag"],
         extra_fields=build_source_fields("Sample Page", "2024-06-18T10:30:00Z"),
     )
@@ -158,7 +155,6 @@ def test_build_yaml_header_with_source() -> None:
 def test_prepare_wikitext_omits_source_fields_when_disabled(monkeypatch) -> None:
     monkeypatch.setattr(convert, "NO_SOURCE_FIELDS", True)
     yaml_header, _, _ = prepare_wikitext("Page body [[Category:Characters]]", "Sample Page")
-    assert "title: Sample Page" in yaml_header
     assert "source/" not in yaml_header
 
 
@@ -247,7 +243,6 @@ def test_create_tag_indexes_writes_new_file(tmp_path, monkeypatch) -> None:
     filepath = tmp_path / "categories" / "Category Characters.md"
     assert filepath.exists()
     content = filepath.read_text(encoding="utf-8")
-    assert "Index: Characters" in content
     assert "- Characters" in content
     assert "- [[Aragorn]]" in content
     assert "- [[Legolas]]" in content
@@ -279,7 +274,6 @@ Original category page content.
     assert "source/url: https://example.com/wiki/Category:Characters" in content
     assert "- existing_tag" in content
     assert "- Characters" in content
-    assert "title: Category Characters" in content
     assert "# Characters Index" in content
     assert "- [[Aragorn]]" in content
 

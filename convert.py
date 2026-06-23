@@ -435,14 +435,13 @@ def sanitize_for_yaml(obj: Any) -> Any:
 
 
 def build_yaml_header(
-    title: str,
     tags: Union[List[str], str],
     extra_fields: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build Obsidian-style YAML front matter for a page."""
     # Ensure tags are unique (if tags is a list), but preserve string if given
     tags = list(dict.fromkeys([tags] if isinstance(tags, str) else tags))
-    header = {'title': title, 'tags': tags}
+    header = {'tags': tags}
     if extra_fields:
         header.update(sanitize_for_yaml(extra_fields))
 
@@ -599,7 +598,7 @@ def prepare_wikitext(
 
     cleaned_text = str(wikicode).strip()
     source_fields = None if NO_SOURCE_FIELDS else build_source_fields(original_title, revision_date)
-    yaml_header = build_yaml_header(original_title, tags, extra_fields=source_fields)
+    yaml_header = build_yaml_header(tags, extra_fields=source_fields)
 
     # Track tags for index
     for tag in tags:
@@ -744,17 +743,16 @@ def create_tag_indexes() -> None:
             header, body = split_front_matter(existing_content)
             if header is not None:
                 merged_tags = merge_tags(header.get("tags"), tag)
-                title = header.get("title", f"Index: {display_tag}")
                 extra_fields = {k: v for k, v in header.items() if k not in ("title", "tags")}
                 if NO_SOURCE_FIELDS:
                     extra_fields = {
                         k: v for k, v in extra_fields.items() if not str(k).startswith("source/")
                     }
                 yaml_header = build_yaml_header(
-                    title, merged_tags, extra_fields=extra_fields or None
+                    merged_tags, extra_fields=extra_fields or None
                 )
             else:
-                yaml_header = build_yaml_header(f"Index: {display_tag}", tag)
+                yaml_header = build_yaml_header(tag)
 
             text_body = body.rstrip()
             if index_content not in text_body:
@@ -765,7 +763,7 @@ def create_tag_indexes() -> None:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
         else:
-            yaml_header = build_yaml_header(f"Index: {display_tag}", tag)
+            yaml_header = build_yaml_header(tag)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(yaml_header + index_content + "\n")
     logging.info(f"📚 Index pages created under {CATEGORY_DIR}/ with tag references")
