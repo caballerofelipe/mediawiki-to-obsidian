@@ -37,22 +37,21 @@ def test_clean_heading_ids() -> None:
 # ***************
 # Pandoc-style link cleanup (input reflects Pandoc 3.9.0.2 output)
 def test_fix_links_from_pandoc_internal(monkeypatch) -> None:
-    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
+    monkeypatch.setattr(convert, "USE_PANDOC", False)
     md = 'This is a [Foo Bar](Foo_Bar "Foo Bar"){.wikilink} and [Alias](Target_Page "Alias"){.wikilink}.'
     expected = 'This is a [[Foo Bar]] and [[Target Page|Alias]].'
     assert fix_links_from_pandoc(md) == expected
 
 
 def test_fix_links_from_pandoc_restores_underscores_with_pandoc(monkeypatch) -> None:
-    monkeypatch.setattr(convert, "PANDOC_SKIP", False)
-    monkeypatch.setattr(convert, "PANDOC_AVAILABLE", True)
+    monkeypatch.setattr(convert, "USE_PANDOC", True)
     md = '[Category Main Characters](categories/Category_Main:Characters "Category Main_Characters"){.wikilink}'
     expected = '[[categories/Category Main_Characters|Category Main_Characters]]'
     assert fix_links_from_pandoc(md) == expected
 
 
 def test_fix_links_from_pandoc_external(monkeypatch) -> None:
-    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
+    monkeypatch.setattr(convert, "USE_PANDOC", False)
     md = 'Visit [Google](https://google.com) or contact [me](mailto:test@example.com).'
     assert fix_links_from_pandoc(md) == md  # external links are left unchanged
 
@@ -130,7 +129,7 @@ def test_build_yaml_header_with_source() -> None:
 # ***************
 # Template to callout conversion
 def test_transform_templates_to_callouts(monkeypatch) -> None:
-    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
+    monkeypatch.setattr(convert, "USE_PANDOC", False)
     wikitext = """{{Infobox_character
 | name = Aragorn
 | race = [[Human]]
@@ -187,7 +186,7 @@ def test_prep_wikilinks_rewrites_category_links() -> None:
 
 
 def test_prep_wikilinks_normalizes_tag_names_without_pandoc(monkeypatch) -> None:
-    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
+    monkeypatch.setattr(convert, "USE_PANDOC", False)
     wikicode = mwparserfromhell.parse("[[Category:Main Characters]]")
     wikicode, tags = prep_wikilinks_download_files_and_get_categories(wikicode)
     assert tags == ["Main_Characters"]
@@ -195,8 +194,7 @@ def test_prep_wikilinks_normalizes_tag_names_without_pandoc(monkeypatch) -> None
 
 
 def test_prep_wikilinks_normalizes_tag_names_with_pandoc(monkeypatch) -> None:
-    monkeypatch.setattr(convert, "PANDOC_SKIP", False)
-    monkeypatch.setattr(convert, "PANDOC_AVAILABLE", True)
+    monkeypatch.setattr(convert, "USE_PANDOC", True)
     wikicode = mwparserfromhell.parse("[[Category:Main Characters]]")
     wikicode, tags = prep_wikilinks_download_files_and_get_categories(wikicode)
     assert tags == ["Main_Characters"]

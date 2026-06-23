@@ -68,6 +68,7 @@ PANDOC_SKIP: bool = args.pandoc_skip
 PANDOC_TO_FORMAT: str = "markdown" if args.pandoc_plain_markdown else "markdown-raw_attribute"
 COOKIES: Optional[str] = args.cookies
 PANDOC_AVAILABLE: bool = shutil.which("pandoc") is not None
+USE_PANDOC: bool = not PANDOC_SKIP and PANDOC_AVAILABLE
 
 if not PANDOC_SKIP and not PANDOC_AVAILABLE:
     logging.warning(
@@ -211,7 +212,6 @@ def prep_wikilinks_download_files_and_get_categories(
     """
     wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     categories = []
-    use_pandoc = not PANDOC_SKIP and PANDOC_AVAILABLE
     for link in list(wikicode.ifilter_wikilinks(recursive=True)):
         target = link.title.strip()
         if target.lower().startswith(("file:", "image:", "media:")):
@@ -228,13 +228,13 @@ def prep_wikilinks_download_files_and_get_categories(
             categories.append(category_normalized)
             filename = f'Category {category_normalized}'
             filename_text = clean_filename(filename)
-            filename_uri = clean_filename(filename, use_pandoc)
-            cat_dir = clean_filename(CATEGORY_DIR, use_pandoc)
+            filename_uri = clean_filename(filename, USE_PANDOC)
+            cat_dir = clean_filename(CATEGORY_DIR, USE_PANDOC)
             wikilink = f'[[{cat_dir}/{filename_uri}|{filename_text}]]'
             wikicode.replace(link, wikilink)
             continue
         else:
-            filename = clean_filename(target, use_pandoc)
+            filename = clean_filename(target, USE_PANDOC)
             wikicode.replace(link, f'[[{filename}]]')
             continue
     return wikicode, categories
@@ -371,9 +371,8 @@ def transform_templates_to_callouts(wikicode: Wikicode) -> Wikicode:
         template_dict = template_to_dict(template)
         callout = template_dict_to_callout(template_dict)
 
-        use_pandoc = not PANDOC_SKIP and PANDOC_AVAILABLE
         callout_to_insert = '\n'
-        if use_pandoc:
+        if USE_PANDOC:
             callout_to_insert += '\n<source lang="obsidian-callout-block">'
             callout_to_insert += callout
             callout_to_insert += '\n</source>'
@@ -455,11 +454,9 @@ def fix_links_from_pandoc(md_text: str) -> str:
     are converted back to underscores so they match on-disk filenames after the
     underscore-to-colon round trip in ``prep_wikilinks_download_files_and_get_categories``.
     """
-    use_pandoc = not PANDOC_SKIP and PANDOC_AVAILABLE
-
     def replace_wikilinks_no_files(match: re.Match) -> str:
         filename = match.group(2).replace('_', ' ')
-        if use_pandoc:
+        if USE_PANDOC:
             filename = filename.replace(':', '_')
         text = match.group(3).strip()
         if filename == text:
@@ -649,7 +646,7 @@ def convert_pages(tree: ET.ElementTree) -> None:
             )
             yaml_str, wikitext, tags = prepare_wikitext(raw_text, original_title, revision_date)
 
-            if not PANDOC_SKIP and PANDOC_AVAILABLE:
+            if USE_PANDOC:
                 wikitext = convert_with_pandoc(wikitext, original_title)
                 wikitext = cleanup_markdown(wikitext)
             markdown = f"{yaml_str}\n{wikitext.strip()}\n"
