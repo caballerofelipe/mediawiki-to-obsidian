@@ -10,6 +10,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - 📦 Converts all `{{templates}}` into Obsidian callout blocks in place (infoboxes, navboxes, etc.)
 - 📄 On `Template:` namespace pages, preserves the original wikitext in a reference source block
 - 📂 Writes `Category:` namespace pages under `categories/` (e.g. `Category Characters.md`)
+- 📁 Writes `File:` namespace description pages under `files metadata/` (e.g. `File Example.jpg.md`), with an embedded preview of the upload and the wiki's file metadata
 - 🖼️ Downloads and embeds images as `![[images/Filename]]` (supports `File:`, `Image:`, and `Media:` links)
 - 🔗 Converts internal links to Obsidian-safe `[[Wikilinks]]` via Pandoc post-processing
 - 📚 Automatically generates tag-based category index files under `categories/` (e.g. `Category Characters.md`), merging with exported category pages when both exist
@@ -248,8 +249,8 @@ php maintenance/run.php dumpBackup --current > wiki-dump.xml
 # Full revision history
 php maintenance/run.php dumpBackup --full > wiki-dump-full.xml
 
-# Specific namespaces only (0 = main, 10 = Template, 14 = Category, etc.)
-php maintenance/run.php dumpBackup --current --namespaces 0,10,14 > partial-dump.xml
+# Specific namespaces only (0 = main, 6 = File, 10 = Template, 14 = Category, etc.)
+php maintenance/run.php dumpBackup --current --namespaces 0,6,10,14 > partial-dump.xml
 
 # Pages listed in a text file (one title per line)
 php maintenance/run.php dumpBackup --current --pagelist pages.txt > selected.xml
@@ -358,6 +359,9 @@ obsidian_vault/
 │   ├── Category Characters.md
 │   ├── Category Locations.md
 │   └── ...
+├── files metadata/
+│   ├── File Example.jpg.md
+│   └── ...
 ├── images/
 │   ├── Example.jpg
 │   └── ...
@@ -367,6 +371,8 @@ obsidian_vault/
 ```
 
 Main article pages live at the vault root. Exported `Category:` namespace pages and auto-generated tag indexes both live under `categories/`. When a wiki category page and a generated index target the same filename, the converter keeps the category page content, merges the index tag into the existing YAML `tags`, and appends a member list to the body.
+
+Exported `File:` namespace pages live under `files metadata/`. Each page includes a **File** section with an Obsidian embed of the uploaded file (`![[images/...]]`) and a **Metadata** section with the original file description from the wiki. Include namespace `6` in your XML export when you want these description pages alongside the downloaded binaries in `images/`.
 
 Each converted page includes YAML frontmatter with `title`, `tags`, and source provenance read from the XML export:
 
@@ -398,7 +404,7 @@ Wiki templates render as Obsidian callouts in place — wherever the template ap
 > - **image**: ![[images/Aragorn.jpg]]
 ```
 
-Category wikilinks in the body become piped links to the matching category page (e.g. `[[Category:Characters]]` → `[[categories/Category Characters|Category Characters]]` → `categories/Category Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference. Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`).
+Category wikilinks in the body become piped links to the matching category page (e.g. `[[Category:Characters]]` → `[[categories/Category Characters|Category Characters]]` → `categories/Category Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference. Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`). Exported `File:` pages follow the same pattern under `files metadata/` (e.g. `File:Example.jpg` → `files metadata/File Example.jpg.md`).
 
 ## 👤 Author
 

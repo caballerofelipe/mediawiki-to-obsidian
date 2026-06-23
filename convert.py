@@ -24,6 +24,7 @@ import yaml
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 IMAGE_DIR = "images"
 CATEGORY_DIR = "categories"
+FILE_DIR = "files metadata"
 
 
 def TAG(t: str) -> str:
@@ -454,6 +455,7 @@ def fix_links_from_pandoc(md_text: str) -> str:
     are converted back to underscores so they match on-disk filenames after the
     underscore-to-colon round trip in ``prep_wikilinks_download_files_and_get_categories``.
     """
+
     def replace_wikilinks_no_files(match: re.Match) -> str:
         filename = match.group(2).replace('_', ' ')
         if USE_PANDOC:
@@ -636,6 +638,14 @@ def convert_pages(tree: ET.ElementTree) -> None:
             if title.startswith('Category:'):
                 title = re.sub('^Category:', 'Category ', title)
                 page_subdir = CATEGORY_DIR
+            if title.startswith('File:'):
+                title = re.sub('^File:', 'File ', original_title)
+                page_subdir = FILE_DIR
+                # Add the file to be viewed inside this metadata file
+                # The link will be processed inside prepare_wikitext like original links
+                raw_text += '==File==\n'
+                raw_text += f'\n[[{original_title}]]'
+                raw_text += '\n\n==Metadata=='
 
             raw_text += text_elem.text
             timestamp_elem = latest_revision.find(TAG("timestamp"))
