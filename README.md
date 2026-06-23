@@ -363,6 +363,10 @@ Some wikis only allow logged-in users to download images or use the API. If you 
 python convert.py wiki-dump.xml --cookies "sessionid=abc123; csrftoken=xyz789"
 ```
 
+### Troubleshooting
+
+> **Pandoc failed for a page:** If you see `⚠️ Pandoc failed for '{title}'. Using raw text (--verbose for more info).`, the script falls back to raw wikitext for that page. This is often caused by malformed markup in the original MediaWiki source — for example, an HTML tag that is not closed. Run with `--verbose` to see Pandoc's stderr and the wikitext that was passed to it.
+
 ---
 
 ## 🗂️ Output Structure
