@@ -5,7 +5,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 ## ✨ Features
 
 - ✅ Converts MediaWiki pages to Obsidian-compatible Markdown
-- 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[Category …]]` pages
+- 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[categories/Category …|Category …]]` pages
 - 📋 Adds YAML `source/*` fields on each page — wiki generator, site URL, page URL, and revision date
 - 📦 Converts all `{{templates}}` into Obsidian callout blocks in place (infoboxes, navboxes, etc.)
 - 📄 On `Template:` namespace pages, preserves the original wikitext in a reference source block
@@ -398,7 +398,7 @@ Wiki templates render as Obsidian callouts in place — wherever the template ap
 > - **image**: ![[images/Aragorn.jpg]]
 ```
 
-Category wikilinks in the body become links to the matching category page (e.g. `[[Category Characters]]` → `categories/Category Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference. Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`).
+Category wikilinks in the body become piped links to the matching category page (e.g. `[[Category:Characters]]` → `[[categories/Category Characters|Category Characters]]` → `categories/Category Characters.md`). Pages in the `Template:` namespace also include the original MediaWiki source in a preserved block for reference. Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`).
 
 ## 👤 Author
 

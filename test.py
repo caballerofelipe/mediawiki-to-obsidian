@@ -5,55 +5,73 @@ Pandoc link post-processing tests reflect output from Pandoc 3.9.0.2.
 
 import sys
 
-sys.argv = ["test.py", "dummy.xml"]
-
 import mwparserfromhell
+
 import convert
 from convert import (
-    clean_heading_ids,
-    fix_links_from_pandoc,
-    build_yaml_header,
     build_mediawiki_page_url,
     build_source_fields,
-    transform_templates_to_callouts,
-    merge_tags,
-    split_front_matter,
-    process_categories,
+    build_yaml_header,
+    clean_heading_ids,
     create_tag_indexes,
+    fix_links_from_pandoc,
+    merge_tags,
+    prep_wikilinks_download_files_and_get_categories,
+    split_front_matter,
+    transform_templates_to_callouts,
 )
 
+sys.argv = ["test.py", "dummy.xml"]
 
-# Test 1: Heading cleanup
+
+
+
+# ***************
+# Heading cleanup
 def test_clean_heading_ids() -> None:
     md = "# Heading 1 {#heading1}\n## Heading 2 {#heading2}"
     expected = "# Heading 1\n## Heading 2"
     assert clean_heading_ids(md) == expected
 
 
-# Test 2: Pandoc-style link cleanup
-def test_fix_links_from_pandoc_internal() -> None:
+# ***************
+# Pandoc-style link cleanup (input reflects Pandoc 3.9.0.2 output)
+def test_fix_links_from_pandoc_internal(monkeypatch) -> None:
+    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
     md = 'This is a [Foo Bar](Foo_Bar "Foo Bar"){.wikilink} and [Alias](Target_Page "Alias"){.wikilink}.'
     expected = 'This is a [[Foo Bar]] and [[Target Page|Alias]].'
     assert fix_links_from_pandoc(md) == expected
 
 
-def test_fix_links_from_pandoc_external() -> None:
+def test_fix_links_from_pandoc_restores_underscores_with_pandoc(monkeypatch) -> None:
+    monkeypatch.setattr(convert, "PANDOC_SKIP", False)
+    monkeypatch.setattr(convert, "PANDOC_AVAILABLE", True)
+    md = '[Category Main Characters](categories/Category_Main:Characters "Category Main_Characters"){.wikilink}'
+    expected = '[[categories/Category Main_Characters|Category Main_Characters]]'
+    assert fix_links_from_pandoc(md) == expected
+
+
+def test_fix_links_from_pandoc_external(monkeypatch) -> None:
+    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
     md = 'Visit [Google](https://google.com) or contact [me](mailto:test@example.com).'
-    assert fix_links_from_pandoc(md) == md  # Should remain unchanged
+    assert fix_links_from_pandoc(md) == md  # external links are left unchanged
 
 
-# Test 3: YAML frontmatter generation
+# ***************
+# YAML front matter
 def test_build_yaml_header_basic() -> None:
     title = "Sample_Page Title"
     tags = ["category_one", "tag_two"]
     yaml = build_yaml_header(title, tags)
     assert "---" in yaml
-    assert "title: Sample_Page Title" in yaml  # Spaces Shouldn't be converted into underscores
+    assert "title: Sample_Page Title" in yaml  # page title is written verbatim to YAML
     assert "tags:" in yaml
     assert "- category_one" in yaml
     assert "- tag_two" in yaml
 
 
+# ***************
+# Wiki URL extraction and page links
 def test_build_mediawiki_page_url_pretty() -> None:
     convert.WIKI_BASE_URL = "https://en.wikipedia.org/wiki/Main_Page"
     assert build_mediawiki_page_url("Aragorn") == "https://en.wikipedia.org/wiki/Aragorn"
@@ -90,6 +108,8 @@ def test_extract_wiki_url_reads_generator() -> None:
     assert sitename == "Wikipedia"
 
 
+# ***************
+# YAML front matter with source metadata
 def test_build_yaml_header_with_source() -> None:
     convert.WIKI_URL = "https://example.com"
     convert.WIKI_BASE_URL = "https://example.com/wiki/Main_Page"
@@ -101,14 +121,14 @@ def test_build_yaml_header_with_source() -> None:
         extra_fields=build_source_fields("Sample Page", "2024-06-18T10:30:00Z"),
     )
     assert (
-        "source/note: Imported from Example Wiki (MediaWiki 1.41.0) @ https://example.com"
-        in yaml
+        "source/note: Imported from Example Wiki (MediaWiki 1.41.0) @ https://example.com" in yaml
     )
     assert "source/url: https://example.com/wiki/Sample_Page" in yaml
     assert "source/date: '2024-06-18T10:30:00Z'" in yaml
 
 
-# Test 4: Template parsing and callout conversion
+# ***************
+# Template to callout conversion
 def test_transform_templates_to_callouts(monkeypatch) -> None:
     monkeypatch.setattr(convert, "PANDOC_SKIP", True)
     wikitext = """{{Infobox_character
@@ -135,7 +155,8 @@ def test_transform_templates_to_callouts(monkeypatch) -> None:
     assert str(cleaned_wikicode) == wikitext_with_callout
 
 
-# Test 5: Category helpers
+# ***************
+# Front matter and tag helpers
 def test_merge_tags_expands_and_dedupes() -> None:
     assert merge_tags(["a", "b"], "c") == ["a", "b", "c"]
     assert merge_tags("solo", ["solo", "new"]) == ["solo", "new"]
@@ -154,18 +175,32 @@ def test_split_front_matter_without_yaml() -> None:
     assert split_front_matter(content) == (None, content)
 
 
-def test_process_categories_rewrites_links() -> None:
+# ***************
+# Category extraction and tag index pages
+def test_prep_wikilinks_rewrites_category_links() -> None:
     wikicode = mwparserfromhell.parse("Article text [[Category:Characters]] end")
-    wikicode, tags = process_categories(wikicode)
+    wikicode, tags = prep_wikilinks_download_files_and_get_categories(wikicode)
     assert tags == ["Characters"]
-    assert str(wikicode) == "Article text [[Category Characters]] end"
+    assert (
+        str(wikicode) == "Article text [[categories/Category Characters|Category Characters]] end"
+    )
 
 
-def test_process_categories_normalizes_tag_names() -> None:
+def test_prep_wikilinks_normalizes_tag_names_without_pandoc(monkeypatch) -> None:
+    monkeypatch.setattr(convert, "PANDOC_SKIP", True)
     wikicode = mwparserfromhell.parse("[[Category:Main Characters]]")
-    wikicode, tags = process_categories(wikicode)
+    wikicode, tags = prep_wikilinks_download_files_and_get_categories(wikicode)
     assert tags == ["Main_Characters"]
-    assert str(wikicode) == "[[Category Main Characters]]"
+    assert str(wikicode) == "[[categories/Category Main_Characters|Category Main_Characters]]"
+
+
+def test_prep_wikilinks_normalizes_tag_names_with_pandoc(monkeypatch) -> None:
+    monkeypatch.setattr(convert, "PANDOC_SKIP", False)
+    monkeypatch.setattr(convert, "PANDOC_AVAILABLE", True)
+    wikicode = mwparserfromhell.parse("[[Category:Main Characters]]")
+    wikicode, tags = prep_wikilinks_download_files_and_get_categories(wikicode)
+    assert tags == ["Main_Characters"]
+    assert str(wikicode) == "[[categories/Category Main:Characters|Category Main_Characters]]"
 
 
 def test_create_tag_indexes_writes_new_file(tmp_path, monkeypatch) -> None:

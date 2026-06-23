@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 import xml.etree.ElementTree as ET
 
 import mwparserfromhell
-from mwparserfromhell.nodes import Template, Wikilink
+from mwparserfromhell.nodes import Template
 from mwparserfromhell.wikicode import Wikicode
 import requests
 from tqdm import tqdm
@@ -79,6 +79,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 tag_to_pages: DefaultDict[str, List[str]] = defaultdict(list)
 filename_counts: DefaultDict[str, int] = defaultdict(int)
+downloaded_images_local_filename: Dict[str, Optional[str]] = {}
 
 WIKI_URL: Optional[str] = None
 WIKI_BASE_URL: Optional[str] = None
@@ -156,9 +157,16 @@ def build_source_fields(original_title: str, revision_date: Optional[str] = None
     return fields
 
 
-def clean_filename(title: str) -> str:
-    """Convert a page title to a safe filename by replacing forbidden characters to underscores."""
-    return re.compile(r'[\\/*?:"<>|{}]').sub('_', title.strip())
+def clean_filename(title: str, underscore_to_colon: bool = False) -> str:
+    """Convert a page title to a safe filename by replacing forbidden characters with underscores.
+
+    When ``underscore_to_colon`` is ``True``, every underscore in the result is replaced with
+    ``:``. Used for wikilink paths that will pass through Pandoc and be restored afterward.
+    """
+    clean_title = re.compile(r'[\\/*?:"<>|{}]').sub('_', title).strip()
+    if underscore_to_colon:
+        clean_title = clean_title.replace('_', ':')
+    return clean_title
 
 
 def normalize_tag(tag: str) -> str:
@@ -169,49 +177,67 @@ def normalize_tag(tag: str) -> str:
 def sort_key_without_diacritics(text: str) -> str:
     """Return a case-insensitive sort key with diacritical marks stripped."""
     normalized = unicodedata.normalize("NFKD", text)
-    without_marks = "".join(
-        char for char in normalized if not unicodedata.combining(char)
-    )
+    without_marks = "".join(char for char in normalized if not unicodedata.combining(char))
     return without_marks.casefold()
 
 
-def process_categories(wikicode: Wikicode) -> Tuple[Wikicode, List[str]]:
-    """Extract categories and rewrite their wikilinks to index links.
+def prep_wikilinks_download_files_and_get_categories(
+    wikicode: Wikicode,
+) -> Tuple[Wikicode, List[str]]:
+    """Rewrite wikilinks for Obsidian, download embedded files, and extract category tags.
 
-    Returns (wikicode, categories).
+    Operates on a deep copy of ``wikicode`` so the input is not mutated. Recursively
+    processes every wikilink (including links inside templates).
+
+    - ``file:`` / ``image:`` / ``media:`` (case-insensitive) — download via
+      ``download_image()`` and replace with ``![[images/<local_filename>]]``; on
+      failure, replace with ``[[<original target>]]_(download failed)_``.
+    - ``category:`` / ``:category:`` (case-insensitive) — strip the prefix, append
+      the normalized name to ``categories``, and replace with
+      ``[[categories/Category <normalized>|<Category <display>>]]`` where the URI
+      segment uses ``clean_filename(..., underscore_to_colon=...)`` and the display
+      text uses ``clean_filename(...)`` without colon substitution.
+    - All other links — replace with ``[[<clean_filename(target, underscore_to_colon=...)>]]``.
+
+    When Pandoc is available and ``--pandoc-skip`` is not set, link paths pass
+    ``underscore_to_colon=True`` so underscores become colons before Pandoc runs.
+
+    Args:
+        wikicode: Parsed MediaWiki wikicode to process.
+
+    Returns:
+        A tuple of the rewritten wikicode and a list of normalized category tag
+        names (duplicates preserved if the same category appears more than once).
     """
     wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
     categories = []
-    for link in wikicode.ifilter_wikilinks():
+    use_pandoc = not PANDOC_SKIP and PANDOC_AVAILABLE
+    for link in list(wikicode.ifilter_wikilinks(recursive=True)):
         target = link.title.strip()
-        if target.lower().startswith("category:"):
-            cat = target[len("category:") :].strip()
-            categories.append(normalize_tag(cat))
-            wikicode.replace(link, f'[[Category {clean_filename(target[len("category:"):])}]]')
+        if target.lower().startswith(("file:", "image:", "media:")):
+            image_name = target.split(":", 1)[1].strip()
+            local_filename = download_image(image_name)
+            if local_filename:
+                wikicode.replace(link, f"![[{IMAGE_DIR}/{local_filename}]]")
+            else:
+                wikicode.replace(link, f'[[{target}]]_(download failed)_')
+            continue
+        elif re.search('^:?category:', target, re.IGNORECASE):
+            category = re.sub('^:?category:', '', target, flags=re.IGNORECASE).strip()
+            category_normalized = normalize_tag(category)
+            categories.append(category_normalized)
+            filename = f'Category {category_normalized}'
+            filename_text = clean_filename(filename)
+            filename_uri = clean_filename(filename, use_pandoc)
+            cat_dir = clean_filename(CATEGORY_DIR, use_pandoc)
+            wikilink = f'[[{cat_dir}/{filename_uri}|{filename_text}]]'
+            wikicode.replace(link, wikilink)
+            continue
+        else:
+            filename = clean_filename(target, use_pandoc)
+            wikicode.replace(link, f'[[{filename}]]')
+            continue
     return wikicode, categories
-
-
-def embed_images(wikicode: Wikicode) -> Wikicode:
-    """Replace file/image wikilinks with Obsidian embeds, downloading images as needed."""
-    wikicode = copy.deepcopy(wikicode)  # Copy to avoid external mutation
-    images = set()
-    nodes = list(wikicode.nodes)  # make a list copy because we'll modify
-
-    for i, node in enumerate(nodes):
-        if isinstance(node, Wikilink):
-            target = node.title.strip()
-            if target.lower().startswith(("file:", "image:", "media:")):
-                image_name = target.split(":", 1)[1].strip()
-                local_filename = download_image(image_name)
-
-                if local_filename:
-                    embed_link = f"![[{IMAGE_DIR}/{local_filename}]]"
-
-                    # Replace the wikilink node in wikicode directly
-                    wikicode.replace(node, embed_link)
-
-                    images.add(embed_link)
-    return wikicode
 
 
 def get_image_url(filename: str) -> Optional[str]:
@@ -241,38 +267,49 @@ def get_image_url(filename: str) -> Optional[str]:
 def download_image(image_name: str) -> Optional[str]:
     """Download an image from the wiki into the vault ``OUTPUT_DIR/IMAGE_DIR`` directory.
 
-    Returns the local filename on success, or ``None`` on failure.
+    Returns the local filename on success, or ``None`` on failure. Successful results are
+    cached in ``downloaded_images_local_filename`` for the duration of the run; failed
+    downloads are not cached and are retried on subsequent calls.
     """
     if not image_name:
         return None
+
+    if (
+        image_name in downloaded_images_local_filename
+        and downloaded_images_local_filename[image_name] is not None
+    ):
+        return downloaded_images_local_filename[image_name]
 
     safe_name = clean_filename(image_name)
     filepath = os.path.join(OUTPUT_DIR, IMAGE_DIR, safe_name)
     if os.path.exists(filepath):
         logging.debug(f"🖼️ Skipping download (already exists): {safe_name}")
-        return safe_name
-
-    try:
-        url = get_image_url(f"File:{image_name}")
-    except Exception as e:
-        logging.error(f"‼️ Could not find URL for image: {image_name}: {e}")
-        return None
-
-    try:
-        resp = requests.get(url, stream=True, headers={"Cookie": COOKIES} if COOKIES else None)
-        if resp.status_code == 200:
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            logging.debug(f"📥 Downloaded image: {safe_name}")
-            return safe_name
+        local_filename: Optional[str] = safe_name
+    else:
+        local_filename = None
+        try:
+            url = get_image_url(f"File:{image_name}")
+        except Exception as e:
+            logging.error(f"‼️ Could not find URL for image: {image_name}: {e}")
         else:
-            logging.error(f"‼️ Failed to download image: {image_name} ({resp.status_code})")
-            return None
-    except Exception as e:
-        logging.error(f"‼️ Error downloading {image_name}: {e}")
-        return None
+            try:
+                resp = requests.get(
+                    url, stream=True, headers={"Cookie": COOKIES} if COOKIES else None
+                )
+                if resp.status_code == 200:
+                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                    with open(filepath, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    logging.debug(f"📥 Downloaded image: {safe_name}")
+                    local_filename = safe_name
+                else:
+                    logging.error(f"‼️ Failed to download image: {image_name} ({resp.status_code})")
+            except Exception as e:
+                logging.error(f"‼️ Error downloading {image_name}: {e}")
+
+    downloaded_images_local_filename[image_name] = local_filename
+    return local_filename
 
 
 def template_to_dict(template: Template) -> Dict[str, Any]:
@@ -304,11 +341,18 @@ def template_dict_to_callout(template_data: Dict[str, Any]) -> str:
     }
 
     callout = ''
-    callout += f'\n> [!{template_data['callout_type']}]' if template_data['callout_type'] else '\n> [!NOTE]'
+    callout += (
+        f'\n> [!{template_data['callout_type']}]'
+        if template_data['callout_type']
+        else '\n> [!NOTE]'
+    )
     if image_name := template_data.get('image'):
         image_name = image_name.strip()
-        download_image(image_name)
-        callout += f'\n> - **image**: ![[{IMAGE_DIR}/{image_name}]]'
+        local_filename = download_image(image_name)
+        if local_filename:
+            callout += f'\n> - **image**: ![[{IMAGE_DIR}/{local_filename}]]'
+        else:
+            callout += f'\n> - **image**: ![[{image_name}]]_(download failed)_'
 
     for data in callout_info:
         callout += f'\n> - **{data}**: {callout_info[data]}'
@@ -386,10 +430,9 @@ def split_front_matter(content: str) -> Tuple[Optional[Dict[str, Any]], str]:
     return header, content[end + 5 :]
 
 
-def merge_tags(
-    existing: Union[List[str], str, None], new: Union[List[str], str]
-) -> List[str]:
+def merge_tags(existing: Union[List[str], str, None], new: Union[List[str], str]) -> List[str]:
     """Merge tag values into a deduplicated list, preserving order."""
+
     def as_list(tags: Union[List[str], str, None]) -> List[str]:
         if tags is None:
             return []
@@ -406,14 +449,23 @@ def clean_heading_ids(md_text: str) -> str:
 
 
 def fix_links_from_pandoc(md_text: str) -> str:
-    """Convert Pandoc wikilink syntax to Obsidian wikilink syntax."""
+    """Convert Pandoc wikilink syntax to Obsidian wikilink syntax.
+
+    When Pandoc is available and ``--pandoc-skip`` is not set, colons in link targets
+    are converted back to underscores so they match on-disk filenames after the
+    underscore-to-colon round trip in ``prep_wikilinks_download_files_and_get_categories``.
+    """
+    use_pandoc = not PANDOC_SKIP and PANDOC_AVAILABLE
+
     def replace_wikilinks_no_files(match: re.Match) -> str:
-        cleaned_filename = clean_filename(match.group(2).strip().replace('_', ' '))
+        filename = match.group(2).replace('_', ' ')
+        if use_pandoc:
+            filename = filename.replace(':', '_')
         text = match.group(3).strip()
-        if cleaned_filename == text:
-            return f'[[{cleaned_filename}]]'
+        if filename == text:
+            return f'[[{filename}]]'
         else:
-            return f'[[{cleaned_filename}|{text}]]'
+            return f'[[{filename}|{text}]]'
 
     pandoc_wikilink_no_files_regex = re.compile(r'(?<!!)\[([^]]+)\]\(([^ ]+) "(.+?)"\)({[^}]+})?')
     md_text_link_no_files_fixed = pandoc_wikilink_no_files_regex.sub(
@@ -507,8 +559,7 @@ def prepare_wikitext(
     """
     text = unescape(raw_text)
     wikicode = mwparserfromhell.parse(text)
-    wikicode, tags = process_categories(wikicode)
-    wikicode = embed_images(wikicode)
+    wikicode, tags = prep_wikilinks_download_files_and_get_categories(wikicode)
 
     wikicode = transform_templates_to_callouts(wikicode)
 
@@ -539,7 +590,7 @@ def convert_pages(tree: ET.ElementTree) -> None:
 
     with tqdm(total=total_pages, desc="Converting pages", disable=disable_tqdm) as pbar:
         for page in tree.findall(".//ns:page", ns):
-            page_subdir = "" # Used in case we want to create the file inside a subdir
+            page_subdir = ""  # Used in case we want to create the file inside a subdir
 
             title_elem = page.find("ns:title", ns)
             if title_elem is None or not title_elem.text:
@@ -579,7 +630,7 @@ def convert_pages(tree: ET.ElementTree) -> None:
                 continue
 
             raw_text = ''
-            
+
             if title.startswith('Template:'):
                 # Add the original source to the file if it's a Template
                 # Used for reference because the template will be changed completely
@@ -633,7 +684,7 @@ def create_tag_indexes() -> None:
     index_dir = os.path.join(OUTPUT_DIR, CATEGORY_DIR)
     os.makedirs(index_dir, exist_ok=True)
     for tag, pages in tag_to_pages.items():
-        tag_filename = ' '.join(str(tag).replace('_', ' ').split())
+        tag_filename = ' '.join(str(tag).split())
         display_tag = tag
         index_lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages, key=sort_key_without_diacritics):
