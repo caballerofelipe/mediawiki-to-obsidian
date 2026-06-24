@@ -2,7 +2,27 @@
 
 This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, Obsidian callouts from wiki templates, YAML frontmatter for tags, and provenance fields linking each page back to the original wiki.
 
-## ✨ Features
+## Table of Contents
+
+- [Features](#-features)
+- [Requirements](#-requirements)
+- [Installation](#-installation)
+  - [1. Install the Pandoc CLI](#1-install-the-pandoc-cli-optional-but-recommended)
+  - [2. Install Python dependencies](#2-install-python-dependencies)
+  - [3. Verify the setup](#3-verify-the-setup)
+- [Creating the input XML file](#-creating-the-input-xml-file)
+  - [CLI (preferred)](#cli-preferred)
+  - [Web (Special:Export)](#web-specialexport)
+- [Usage](#-usage)
+  - [Template namespace pages](#template-namespace-pages---include-templates)
+  - [Skipping Pandoc](#skipping-pandoc---pandoc-skip)
+  - [Pandoc output format](#pandoc-output-format---pandoc-plain-markdown)
+  - [Authenticated wikis](#authenticated-wikis---cookies)
+  - [Troubleshooting](#troubleshooting)
+- [Output Structure](#-output-structure)
+- [Author](#-author)
+
+# ✨ Features
 
 - ✅ Converts MediaWiki pages to Obsidian-compatible Markdown
 - 🏷️ Extracts and normalizes categories as `tags`, rewriting category wikilinks to `[[categories/Category …|Category …]]` pages
@@ -20,13 +40,8 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - 🔐 Optional `--cookies` flag for authenticated wikis (private wikis, login-required image downloads)
 - 🔍 Verbose mode for detailed output and easier troubleshooting
 
-## Support
 
-...
-
----
-
-## 📦 Requirements
+# 📦 Requirements
 
 > **⚠️ Tested Pandoc version: 3.9.0.2**
 >
@@ -44,11 +59,11 @@ Python dependencies are listed in `requirements.txt`. All packages use pinned ve
 | `pyyaml`           | Generate YAML frontmatter (tags, source) |
 | `tqdm`             | Progress bar during conversion         |
 
-## 🛠️ Installation
+# 🛠 Installation
 
 These steps assume **Python 3.8+ is already installed**. Clone or download this repository, then open a terminal in the project folder (`mediawiki-to-markdown`).
 
-### 1. Install the Pandoc CLI (optional but recommended)
+## 1. Install the Pandoc CLI (optional but recommended)
 
 `convert.py` uses Pandoc when available for wikitext-to-Markdown conversion and wikilink cleanup. Without it, the script still runs but leaves raw wikitext in place. You can also pass `--pandoc-skip` at runtime to bypass conversion even when Pandoc is installed.
 
@@ -136,11 +151,11 @@ pandoc --version
 
 </details>
 
-### 2. Install Python dependencies
+## 2. Install Python dependencies
 
 Choose **venv** (built into Python) or **Conda** (if you already use it).
 
-#### Option A — venv (recommended)
+## Option A — venv (recommended)
 
 <details>
 <summary><strong>macOS / Linux</strong></summary>
@@ -196,7 +211,7 @@ To deactivate later: `deactivate`
 
 </details>
 
-#### Option B — Conda
+## Option B — Conda
 
 Works the same on macOS, Linux, and Windows. Conda can install Pandoc alongside your Python dependencies in one environment:
 
@@ -215,7 +230,7 @@ To deactivate later: `conda deactivate`
 
 > **Tip:** If you install Pandoc here, you can skip step 1 above.
 
-### 3. Verify the setup
+## 3. Verify the setup
 
 With your environment activated:
 
@@ -232,11 +247,11 @@ pandoc --version
 
 ---
 
-## 📥 Creating the input XML file
+# 📥 Creating the input XML file
 
 `convert.py` expects a MediaWiki XML export — the same format produced by [Special:Export](https://www.mediawiki.org/wiki/Special:Export) or `dumpBackup.php`. The file must include `<siteinfo>` with a `<base>` URL (for image downloads and page links) and a `<generator>` tag (for the source note in frontmatter).
 
-### CLI (preferred)
+## CLI (preferred)
 
 If you have shell access to the MediaWiki server, use the maintenance script. This is the simplest and most reliable option for full or partial exports.
 
@@ -265,7 +280,7 @@ php dumpBackup.php --current > ../wiki-dump.xml
 
 See the [dumpBackup.php manual](https://www.mediawiki.org/wiki/Manual:DumpBackup.php) for all options.
 
-### Web (Special:Export)
+## Web (Special:Export)
 
 Use this when you do not have server access, or only need a small set of pages.
 
@@ -289,7 +304,7 @@ See [Help:Export](https://www.mediawiki.org/wiki/Help:Export) and [Parameters to
 
 ---
 
-## 🚀 Usage
+# 🚀 Usage
 
 ```bash
 python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--include-templates] [--no-source-fields] [--pandoc-skip] [--pandoc-plain-markdown] [--verbose] [--cookies COOKIES]
@@ -307,7 +322,7 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--include-templates
 | `--verbose`               | Enable verbose logging (disables progress bar)                              |
 | `--cookies`               | Cookie header for authenticated API/image requests (see below)              |
 
-### Template namespace pages (`--include-templates`)
+## Template namespace pages (`--include-templates`)
 
 `Template:` namespace pages are documentation for wiki templates — they are not the same as `{{template}}` invocations in article bodies. Inline templates are always converted to Obsidian callouts regardless of this flag.
 
@@ -319,7 +334,7 @@ python convert.py wiki-dump.xml --include-templates
 
 When included, each `Template:` page is written at the vault root (e.g. `Template_Infobox character.md`) with the original MediaWiki wikitext preserved in a `<source>` reference block.
 
-### Skipping Pandoc (`--pandoc-skip`)
+## Skipping Pandoc (`--pandoc-skip`)
 
 Use this when you do not have Pandoc installed, or when you prefer to keep the original wikitext (e.g. for manual cleanup later). Categories, template callouts, images, YAML frontmatter (tags and source fields), and image downloads are still processed — only the Pandoc Markdown conversion and post-processing step is skipped.
 
@@ -327,7 +342,7 @@ Use this when you do not have Pandoc installed, or when you prefer to keep the o
 python convert.py wiki-dump.xml --pandoc-skip
 ```
 
-### Pandoc output format (`--pandoc-plain-markdown`)
+## Pandoc output format (`--pandoc-plain-markdown`)
 
 By default, the script calls Pandoc with `--to=markdown-raw_attribute`. In Pandoc's format syntax, the `-raw_attribute` suffix **disables** the [`raw_attribute` extension](https://pandoc.org/MANUAL.html#extension-raw_attribute) on the Markdown writer. That produces cleaner output for most Obsidian vaults — wikilinks, headings, and standard Markdown structures convert normally, and you avoid `{=html}` fenced code blocks in your notes.
 
@@ -351,7 +366,7 @@ python convert.py wiki-dump.xml --pandoc-plain-markdown
 
 > **Tip:** If converted pages look fine in Obsidian, stick with the default. If you notice missing tables, stripped inline styles, or lost template HTML, try `--pandoc-plain-markdown` and review the output — you may need to clean up `{=html}` blocks manually afterward.
 
-### Authenticated wikis (`--cookies`)
+## Authenticated wikis (`--cookies`)
 
 Some wikis only allow logged-in users to download images or use the API. If you see a permission error during conversion, pass the `Cookie` header from an authenticated browser session:
 
@@ -363,13 +378,13 @@ Some wikis only allow logged-in users to download images or use the API. If you 
 python convert.py wiki-dump.xml --cookies "sessionid=abc123; csrftoken=xyz789"
 ```
 
-### Troubleshooting
+## Troubleshooting
 
 > **Pandoc failed for a page:** If you see `⚠️ Pandoc failed for '{title}'. Using raw text (--verbose for more info).`, the script falls back to raw wikitext for that page. This is often caused by malformed markup in the original MediaWiki source — for example, an HTML tag that is not closed. Run with `--verbose` to see Pandoc's stderr and the wikitext that was passed to it.
 
 ---
 
-## 🗂️ Output Structure
+# 🗂 Output Structure
 
 ```text
 obsidian_vault/
@@ -423,6 +438,6 @@ Wiki templates render as Obsidian callouts in place — wherever the template ap
 
 Category wikilinks in the body become piped links to the matching category page (e.g. `[[Category:Characters]]` → `[[categories/Category Characters|Category Characters]]` → `categories/Category Characters.md`). Exported `Category:` pages are written to the same `categories/` folder with the `Category:` prefix renamed to `Category ` in the filename (e.g. `Category:Characters` → `categories/Category Characters.md`). Exported `File:` pages follow the same pattern under `files_metadata/` (e.g. `File:Example.jpg` → `files_metadata/File Example.jpg.md`). `Template:` namespace pages are omitted unless you pass `--include-templates`; when included, each page also preserves the original MediaWiki source in a reference block.
 
-## 👤 Author
+# 👤 Author
 
 Felipe Caballero ([Original idea by Michael Kirkland](https://github.com/mak-kirkland/mediawiki-to-markdown)).
