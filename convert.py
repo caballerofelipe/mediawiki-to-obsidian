@@ -278,7 +278,10 @@ def prep_wikilinks_download_files_and_get_categories(
             continue
         else:
             filename = clean_filename(target, USE_PANDOC)
-            wikicode.replace(link, f'[[{filename}]]')
+            if filename == target:
+                wikicode.replace(link, f'[[{filename}]]')
+            else:
+                wikicode.replace(link, f'[[{filename}|{target}]]')
             continue
     return wikicode, categories
 
