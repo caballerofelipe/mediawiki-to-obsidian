@@ -16,7 +16,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - [Usage](#-usage)
   - [Template namespace pages](#template-namespace-pages---include-templates)
   - [Skipping Pandoc](#skipping-pandoc---pandoc-skip)
-  - [Pandoc output format](#pandoc-output-format---pandoc-plain-markdown)
+  - [Pandoc output format](#pandoc-output-format)
   - [Authenticated wikis](#authenticated-wikis---cookies)
   - [Troubleshooting](#troubleshooting)
 - [Output Structure](#-output-structure)
@@ -36,7 +36,8 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - 📚 Automatically generates tag-based category index files under `categories/` (e.g. `Category Characters.md`), merging with exported category pages when both exist
 - 🐢 Uses Pandoc for wikitext-to-Markdown conversion when available (recommended; falls back to raw wikitext on failure)
 - ⏭️ Optional `--pandoc-skip` flag to bypass Pandoc conversion entirely and keep raw wikitext
-- 📝 Optional `--pandoc-plain-markdown` flag to preserve raw HTML via Pandoc's `raw_attribute` writer (see below)
+- 📝 Optional `--pandoc-plain-markdown` flag to enable Pandoc's `raw_attribute` extension and preserve raw HTML (see below)
+- 📊 Optional `--pandoc-extra-tables-exts` flag to re-enable Pandoc's `grid_tables`, `simple_tables`, and `multiline_tables` extensions when the default table output is not working for your wiki (see below)
 - 🔐 Optional `--cookies` flag for authenticated wikis (private wikis, login-required image downloads)
 - 🔍 Verbose mode for detailed output and easier troubleshooting
 
@@ -307,7 +308,7 @@ See [Help:Export](https://www.mediawiki.org/wiki/Help:Export) and [Parameters to
 # 🚀 Usage
 
 ```bash
-python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--include-templates] [--no-source-fields] [--pandoc-skip] [--pandoc-plain-markdown] [--verbose] [--cookies COOKIES]
+python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--include-templates] [--no-source-fields] [--pandoc-skip] [--pandoc-plain-markdown] [--pandoc-extra-tables-exts] [--verbose] [--cookies COOKIES]
 ```
 
 | Argument                  | Description                                                                 |
@@ -318,7 +319,8 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--include-templates
 | `--include-templates`     | Export `Template:` namespace pages (skipped by default)                     |
 | `--no-source-fields`      | Omit YAML `source/*` provenance fields from frontmatter                     |
 | `--pandoc-skip`           | Skip Pandoc conversion and wikilink cleanup, even if Pandoc is installed     |
-| `--pandoc-plain-markdown` | Use Pandoc `--to=markdown` instead of the default `--to=markdown-raw_attribute` |
+| `--pandoc-plain-markdown`   | Enable Pandoc `raw_attribute` extension (off by default; adds `+raw_attribute` to the writer) |
+| `--pandoc-extra-tables-exts`| Re-enable Pandoc `grid_tables`, `simple_tables`, and `multiline_tables` (disabled by default for better table output) |
 | `--verbose`               | Enable verbose logging (disables progress bar)                              |
 | `--cookies`               | Cookie header for authenticated API/image requests (see below)              |
 
@@ -342,9 +344,21 @@ Use this when you do not have Pandoc installed, or when you prefer to keep the o
 python convert.py wiki-dump.xml --pandoc-skip
 ```
 
-## Pandoc output format (`--pandoc-plain-markdown`)
+## Pandoc output format
 
-By default, the script calls Pandoc with `--to=markdown-raw_attribute`. In Pandoc's format syntax, the `-raw_attribute` suffix **disables** the [`raw_attribute` extension](https://pandoc.org/MANUAL.html#extension-raw_attribute) on the Markdown writer. That produces cleaner output for most Obsidian vaults — wikilinks, headings, and standard Markdown structures convert normally, and you avoid `{=html}` fenced code blocks in your notes.
+By default, the script calls Pandoc with:
+
+```text
+--to=markdown-raw_attribute-grid_tables-simple_tables-multiline_tables
+```
+
+The writer string is built from `markdown` plus an explicit `+extension` or `-extension` suffix for each configured extension. With no flags, `raw_attribute` and the three table extensions are all **off** (`-`). The table extensions are disabled on purpose — for most MediaWiki wikitables, that default produces better results in Obsidian than leaving them enabled.
+
+Pass `--verbose` to print the exact Pandoc command once at startup (look for the `🔧` line).
+
+### `--pandoc-plain-markdown`
+
+In Pandoc's format syntax, `-raw_attribute` **disables** the [`raw_attribute` extension](https://pandoc.org/MANUAL.html#extension-raw_attribute) on the Markdown writer. That produces cleaner output for most Obsidian vaults — wikilinks, headings, and standard Markdown structures convert normally, and you avoid `{=html}` fenced code blocks in your notes.
 
 However, disabling `raw_attribute` can drop or reshape HTML that MediaWiki pages often rely on. Pandoc only has limited native Markdown syntax for complex markup (styled tables, nested `<div>`/`<span>` wrappers, figures with captions, inline HTML with attributes, etc.). When `raw_attribute` is off, Pandoc tends to:
 
@@ -354,7 +368,7 @@ However, disabling `raw_attribute` can drop or reshape HTML that MediaWiki pages
 
 Since Pandoc 3.2, the Markdown writer also prefers bare HTML over `{=html}` raw-attribute syntax when `raw_html` is enabled, because the two forms are equivalent in Pandoc's internal representation ([issue #10213](https://github.com/jgm/pandoc/issues/10213)). That makes round-tripping through Pandoc again less predictable, but it does not change the core trade-off: **without `raw_attribute`, you get tidier Markdown at the cost of less faithful HTML preservation.**
 
-Pass `--pandoc-plain-markdown` to use `--to=markdown` instead (with `raw_attribute` enabled). Pandoc will then wrap unrepresentable HTML in explicit `{=html}` fenced blocks and inline spans, preserving the original markup for manual cleanup or downstream tools that understand Pandoc's raw-attribute syntax. This is useful when your wiki dump contains heavy HTML formatting, custom templates rendered as HTML, or structures you need to keep intact even if Obsidian will not render them perfectly out of the box.
+Pass `--pandoc-plain-markdown` to flip `raw_attribute` on (`+raw_attribute`). Pandoc will then wrap unrepresentable HTML in explicit `{=html}` fenced blocks and inline spans, preserving the original markup for manual cleanup or downstream tools that understand Pandoc's raw-attribute syntax. This is useful when your wiki dump contains heavy HTML formatting, custom templates rendered as HTML, or structures you need to keep intact even if Obsidian will not render them perfectly out of the box.
 
 ```bash
 # Default — cleaner Markdown, may simplify or remove some HTML
@@ -364,7 +378,21 @@ python convert.py wiki-dump.xml
 python convert.py wiki-dump.xml --pandoc-plain-markdown
 ```
 
-> **Tip:** If converted pages look fine in Obsidian, stick with the default. If you notice missing tables, stripped inline styles, or lost template HTML, try `--pandoc-plain-markdown` and review the output — you may need to clean up `{=html}` blocks manually afterward.
+### `--pandoc-extra-tables-exts`
+
+By default, this script disables Pandoc's [`grid_tables`](https://pandoc.org/MANUAL.html#extension-grid_tables), [`simple_tables`](https://pandoc.org/MANUAL.html#extension-simple_tables), and [`multiline_tables`](https://pandoc.org/MANUAL.html#extension-multiline_tables) extensions (`-grid_tables-simple_tables-multiline_tables`). For MediaWiki wikitables, that usually produces **better** table output in Obsidian than re-enabling those extensions.
+
+If specific tables still look wrong in your vault, or you need Pandoc's pipe/grid table syntax for a particular dump, pass `--pandoc-extra-tables-exts` to turn all three back on (`+grid_tables+simple_tables+multiline_tables`).
+
+```bash
+# Re-enable table extensions when the default output isn't working for your wiki
+python convert.py wiki-dump.xml --pandoc-extra-tables-exts
+
+# Both flags can be combined
+python convert.py wiki-dump.xml --pandoc-plain-markdown --pandoc-extra-tables-exts
+```
+
+> **Tip:** If converted pages look fine in Obsidian, stick with the default. For **tables**, the defaults are usually best; try `--pandoc-extra-tables-exts` only if you notice tables that still aren't converting as expected. If you notice stripped inline styles or lost template HTML, try `--pandoc-plain-markdown` and review the output — you may need to clean up `{=html}` blocks manually afterward.
 
 ## Authenticated wikis (`--cookies`)
 

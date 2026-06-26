@@ -45,6 +45,29 @@ tag_to_pages: DefaultDict[str, List[str]] = defaultdict(list)
 filename_counts: DefaultDict[str, int] = defaultdict(int)
 downloaded_images_local_filename: Dict[str, Optional[str]] = {}
 
+def build_pandoc_to_format(args: argparse.Namespace) -> str:
+    """Build Pandoc --to= value from opt-in extension flags."""
+    # (extension_name, used_by_default, cli_flag_active)
+    # When the flag is set, the default is flipped.
+    extensions = (
+        ("raw_attribute", False, args.pandoc_plain_markdown),
+        ("grid_tables", False, args.pandoc_extra_tables_exts),
+        ("simple_tables", False, args.pandoc_extra_tables_exts),
+        ("multiline_tables", False, args.pandoc_extra_tables_exts),
+    )
+    parts = ["markdown"]
+    for name, used_by_default, flag_active in extensions:
+        use = used_by_default
+        if flag_active:
+            use = not use
+        parts.append(f"{'+' if use else '-'}{name}")
+    return "".join(parts)
+
+
+def pandoc_command() -> List[str]:
+    """Return the Pandoc argv used for wikitext-to-markdown conversion."""
+    return ['pandoc', '--from=mediawiki', f'--to={PANDOC_TO_FORMAT}', '--wrap=none']
+
 
 def parse_args() -> argparse.Namespace:
     """Parse and return command-line arguments for the converter."""
@@ -68,7 +91,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pandoc-plain-markdown",
         action="store_true",
-        help="Use Pandoc --to=markdown instead of the default --to=markdown-raw_attribute",
+        help="Enable Pandoc raw_attribute extension (off by default in this script's markdown writer)",
+    )
+    parser.add_argument(
+        "--pandoc-extra-tables-exts",
+        action="store_true",
+        help="Enable Pandoc grid_tables, simple_tables, and multiline_tables extensions "
+        "(off by default in the markdown writer)",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument(
@@ -99,16 +128,10 @@ def config() -> Optional[ET.ElementTree]:
     SKIP_TEMPLATES = not args.include_templates
     NO_SOURCE_FIELDS = args.no_source_fields
     PANDOC_SKIP = args.pandoc_skip
-    PANDOC_TO_FORMAT = "markdown" if args.pandoc_plain_markdown else "markdown-raw_attribute"
+    PANDOC_TO_FORMAT = build_pandoc_to_format(args)
     COOKIES = args.cookies
     PANDOC_AVAILABLE = shutil.which("pandoc") is not None
     USE_PANDOC = not PANDOC_SKIP and PANDOC_AVAILABLE
-
-    if not PANDOC_SKIP and not PANDOC_AVAILABLE:
-        logging.warning(
-            "⚠️ Pandoc not found on PATH. Wikitext will be kept as-is. "
-            "Install Pandoc (https://pandoc.org/installing.html) or pass --pandoc-skip."
-        )
 
     # Creating the output dir
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -120,6 +143,15 @@ def config() -> Optional[ET.ElementTree]:
     except ET.ParseError as e:
         logging.error(f"‼️ Failed to parse XML: {e}")
         return
+    
+    if USE_PANDOC:
+        logging.debug("🔧 Pandoc command: `%s {file}`", " ".join(pandoc_command()))
+
+    if not PANDOC_SKIP and not PANDOC_AVAILABLE:
+        logging.warning(
+            "⚠️ Pandoc not found on PATH. Wikitext will be kept as-is. "
+            "Install Pandoc (https://pandoc.org/installing.html) or pass --pandoc-skip."
+        )
 
     # Obtain WIKI variables
     ns = {"ns": NS}
@@ -568,7 +600,7 @@ def convert_with_pandoc(text: str, title: str = "") -> str:
     """Convert wikitext to markdown via Pandoc, falling back to raw text on failure."""
     try:
         result = subprocess.run(
-            ['pandoc', '--from=mediawiki', f'--to={PANDOC_TO_FORMAT}', '--wrap=none'],
+            pandoc_command(),
             input=text.encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

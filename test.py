@@ -3,6 +3,7 @@
 Pandoc link post-processing tests reflect output from Pandoc 3.9.0.2.
 """
 
+import argparse
 import sys
 
 import mwparserfromhell
@@ -10,6 +11,7 @@ import mwparserfromhell
 import convert
 from convert import (
     build_mediawiki_page_url,
+    build_pandoc_to_format,
     build_source_fields,
     build_yaml_header,
     clean_heading_ids,
@@ -55,6 +57,36 @@ def test_fix_links_from_pandoc_external(monkeypatch) -> None:
     monkeypatch.setattr(convert, "USE_PANDOC", False)
     md = 'Visit [Google](https://google.com) or contact [me](mailto:test@example.com).'
     assert fix_links_from_pandoc(md) == md  # external links are left unchanged
+
+
+# ***************
+# Pandoc writer format
+def test_build_pandoc_to_format_default() -> None:
+    args = argparse.Namespace(pandoc_plain_markdown=False, pandoc_extra_tables_exts=False)
+    assert build_pandoc_to_format(args) == (
+        "markdown-raw_attribute-grid_tables-simple_tables-multiline_tables"
+    )
+
+
+def test_build_pandoc_to_format_plain_markdown() -> None:
+    args = argparse.Namespace(pandoc_plain_markdown=True, pandoc_extra_tables_exts=False)
+    assert build_pandoc_to_format(args) == (
+        "markdown+raw_attribute-grid_tables-simple_tables-multiline_tables"
+    )
+
+
+def test_build_pandoc_to_format_extra_tables_exts() -> None:
+    args = argparse.Namespace(pandoc_plain_markdown=False, pandoc_extra_tables_exts=True)
+    assert build_pandoc_to_format(args) == (
+        "markdown-raw_attribute+grid_tables+simple_tables+multiline_tables"
+    )
+
+
+def test_build_pandoc_to_format_both_flags() -> None:
+    args = argparse.Namespace(pandoc_plain_markdown=True, pandoc_extra_tables_exts=True)
+    assert build_pandoc_to_format(args) == (
+        "markdown+raw_attribute+grid_tables+simple_tables+multiline_tables"
+    )
 
 
 # ***************
