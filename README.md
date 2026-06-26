@@ -41,6 +41,10 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vaul
 - 🔐 Optional `--cookies` flag for authenticated wikis (private wikis, login-required image downloads)
 - 🔍 Verbose mode for detailed output and easier troubleshooting
 
+> **⚠️ One wiki dump per output folder**
+>
+> Point each run at a single XML export from one wiki. Running multiple dumps into the same `OUTPUT_DIR` (especially from different wikis) will mix manifests, images, and page mappings and produce wrong results. For several wikis, convert each dump to its own folder, then combine or arrange those folders as you like — they can live as subfolders inside one Obsidian vault.
+
 
 # 📦 Requirements
 
@@ -324,6 +328,8 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--include-templates
 | `--verbose`               | Enable verbose logging (disables progress bar)                              |
 | `--cookies`               | Cookie header for authenticated API/image requests (see below)              |
 
+> **⚠️ Use one output folder per wiki dump** — do not point multiple exports (or wikis) at the same `OUTPUT_DIR`. See [Features](#-features).
+
 ## Template namespace pages (`--include-templates`)
 
 `Template:` namespace pages are documentation for wiki templates — they are not the same as `{{template}}` invocations in article bodies. Inline templates are always converted to Obsidian callouts regardless of this flag.
@@ -416,6 +422,7 @@ python convert.py wiki-dump.xml --cookies "sessionid=abc123; csrftoken=xyz789"
 
 ```text
 obsidian_vault/
+├── .mediawiki-files.json
 ├── categories/
 │   ├── Category Characters.md
 │   ├── Category Locations.md
@@ -434,6 +441,8 @@ obsidian_vault/
 Main article pages live at the vault root. Exported `Category:` namespace pages and auto-generated tag indexes both live under `categories/`. When a wiki category page and a generated index target the same filename, the converter keeps the category page content, merges the index tag into the existing YAML `tags`, and appends a member list to the body.
 
 Exported `File:` namespace pages live under `files_metadata/`. Each page includes a **File** section with an Obsidian embed of the uploaded file (`![[images/...]]`) and a **Metadata** section with the original file description from the wiki. Include namespace `6` in your XML export when you want these description pages alongside the downloaded binaries in `images/`.
+
+The vault root also contains `.mediawiki-files.json`, a converter-managed manifest that maps wiki file names (as in `[[File:...]]` links) to basenames under `images/`. It keeps those mappings stable when you re-run the converter. If two different wiki names would sanitize to the same local filename (for example `Photo:Test.jpg` and `Photo_Test.jpg` both becoming `Photo_Test.jpg`), later ones get `_1`, `_2`, and so on before the extension. You can ignore this file in Obsidian; edit it only if you understand how image paths are resolved.
 
 Each converted page includes YAML frontmatter with `tags` and source provenance read from the XML export (omit provenance with `--no-source-fields`):
 

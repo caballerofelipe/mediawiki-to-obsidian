@@ -4,12 +4,14 @@ Pandoc link post-processing tests reflect output from Pandoc 3.9.0.2.
 """
 
 import argparse
+import os
 import sys
 
 import mwparserfromhell
 
 import convert
 from convert import (
+    allocate_image_local_filename,
     build_mediawiki_page_url,
     build_pandoc_to_format,
     build_source_fields,
@@ -17,9 +19,11 @@ from convert import (
     clean_heading_ids,
     create_tag_indexes,
     fix_links_from_pandoc,
+    load_image_manifest,
     merge_tags,
     prep_wikilinks_download_files_and_get_categories,
     prepare_wikitext,
+    save_image_manifest,
     split_front_matter,
     transform_templates_to_callouts,
 )
@@ -364,3 +368,100 @@ Original category page content.
     assert content.count("- [[Aragorn]]") == 1
     assert "Original category page content." in content
     assert "- Characters" in content
+
+
+# ***************
+# Image manifest and filename allocation
+def reset_image_state(output_dir: str = "/tmp/vault") -> None:
+    convert.OUTPUT_DIR = output_dir
+    convert.IMAGE_MANIFEST_PATH = os.path.join(output_dir, convert.IMAGE_MANIFEST_FILENAME)
+    convert.downloaded_images_local_filename.clear()
+    convert.image_manifest_dirty = False
+    convert.image_local_name_owner.clear()
+    convert.image_manifest = {
+        "version": convert.IMAGE_MANIFEST_VERSION,
+        "wiki_url": None,
+        "files": {},
+    }
+
+
+def test_allocate_image_local_filename_disambiguates_sanitized_collision(monkeypatch) -> None:
+    reset_image_state()
+
+    first = allocate_image_local_filename("Photo:Test.jpg")
+    second = allocate_image_local_filename("Photo_Test.jpg")
+
+    assert first == "Photo_Test.jpg"
+    assert second == "Photo_Test_1.jpg"
+
+
+def test_allocate_image_local_filename_reuses_manifest_entry(monkeypatch) -> None:
+    reset_image_state()
+    convert.image_manifest["files"]["Photo:Test.jpg"] = {"local": "Photo_Test_1.jpg"}
+    convert.image_local_name_owner["Photo_Test_1.jpg"] = "Photo:Test.jpg"
+
+    assert allocate_image_local_filename("Photo:Test.jpg") == "Photo_Test_1.jpg"
+
+
+def test_image_manifest_roundtrip(tmp_path, monkeypatch) -> None:
+    reset_image_state(str(tmp_path))
+    monkeypatch.setattr(convert, "WIKI_URL", "https://wiki.example")
+
+    convert.record_image_manifest_entry(
+        "Photo:Test.jpg",
+        "Photo_Test.jpg",
+        source_url="https://wiki.example/images/Photo%3ATest.jpg",
+    )
+    save_image_manifest()
+
+    manifest_path = tmp_path / convert.IMAGE_MANIFEST_FILENAME
+    assert manifest_path.is_file()
+    assert manifest_path.read_text(encoding="utf-8").startswith("// MediaWiki image manifest")
+
+    reset_image_state(str(tmp_path))
+    load_image_manifest()
+
+    assert convert.image_manifest["wiki_url"] == "https://wiki.example"
+    assert convert.image_manifest["files"]["Photo:Test.jpg"]["local"] == "Photo_Test.jpg"
+    assert (
+        convert.image_manifest["files"]["Photo:Test.jpg"]["source_url"]
+        == "https://wiki.example/images/Photo%3ATest.jpg"
+    )
+    assert convert.image_local_name_owner["Photo_Test.jpg"] == "Photo:Test.jpg"
+
+
+def test_download_image_writes_disambiguated_files(tmp_path, monkeypatch) -> None:
+    reset_image_state(str(tmp_path))
+    monkeypatch.setattr(convert, "WIKI_URL", "https://wiki.example")
+
+    image_dir = tmp_path / convert.IMAGE_DIR
+    image_dir.mkdir()
+    (image_dir / "Photo_Test.jpg").write_bytes(b"first")
+
+    def fake_get_image_url(filename: str) -> str:
+        return f"https://wiki.example/{filename}"
+
+    class FakeResponse:
+        status_code = 200
+
+        def iter_content(self, chunk_size: int = 8192):
+            yield b"second"
+
+    monkeypatch.setattr(convert, "get_image_url", fake_get_image_url)
+    monkeypatch.setattr(convert.requests, "get", lambda *args, **kwargs: FakeResponse())
+
+    first = convert.download_image("Photo:Test.jpg")
+    second = convert.download_image("Photo_Test.jpg")
+
+    assert first == "Photo_Test.jpg"
+    assert second == "Photo_Test_1.jpg"
+    assert (image_dir / "Photo_Test.jpg").read_bytes() == b"first"
+    assert (image_dir / "Photo_Test_1.jpg").read_bytes() == b"second"
+    assert convert.image_manifest["files"]["Photo:Test.jpg"]["local"] == "Photo_Test.jpg"
+    assert convert.image_manifest["files"]["Photo_Test.jpg"]["local"] == "Photo_Test_1.jpg"
+
+    save_image_manifest()
+    manifest_text = (tmp_path / convert.IMAGE_MANIFEST_FILENAME).read_text(encoding="utf-8")
+    assert manifest_text.startswith("// MediaWiki image manifest")
+    manifest = convert.parse_image_manifest_text(manifest_text)
+    assert manifest["files"]["Photo_Test.jpg"]["local"] == "Photo_Test_1.jpg"

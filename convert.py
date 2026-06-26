@@ -2,6 +2,7 @@ import argparse
 from collections import defaultdict
 import copy
 from html import unescape
+import json
 import logging
 import os
 import re
@@ -23,11 +24,19 @@ import yaml
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 IMAGE_DIR = "images"
+IMAGE_MANIFEST_FILENAME = ".mediawiki-files.json"
+IMAGE_MANIFEST_VERSION = 1
+IMAGE_MANIFEST_HEADER = """\
+// MediaWiki image manifest created by mediawiki-to-obsidian.
+// Maps wiki file names (as in [[File:...]] links) to basenames under images/.
+// Re-run the converter to refresh; edit only if you know how paths are resolved.
+"""
 CATEGORY_DIR = "categories"
 FILE_DIR = "files_metadata"
 
 INPUT_XML: str = None
 OUTPUT_DIR: str = None
+IMAGE_MANIFEST_PATH: Optional[str] = None
 SKIP_REDIRECTS: bool = None
 SKIP_TEMPLATES: bool = None
 NO_SOURCE_FIELDS: bool = None
@@ -44,6 +53,13 @@ WIKI_NAME: Optional[str] = None
 tag_to_pages: DefaultDict[str, List[str]] = defaultdict(list)
 filename_counts: DefaultDict[str, int] = defaultdict(int)
 downloaded_images_local_filename: Dict[str, Optional[str]] = {}
+image_manifest: Dict[str, Any] = {
+    "version": IMAGE_MANIFEST_VERSION,
+    "wiki_url": None,
+    "files": {},
+}
+image_manifest_dirty: bool = False
+image_local_name_owner: Dict[str, str] = {}
 
 def build_pandoc_to_format(args: argparse.Namespace) -> str:
     """Build Pandoc --to= value from opt-in extension flags."""
@@ -111,7 +127,7 @@ def config() -> Optional[ET.ElementTree]:
     """Parse CLI args, initialize globals, parse XML, and return the element tree."""
     args = parse_args()
 
-    global INPUT_XML, OUTPUT_DIR, SKIP_REDIRECTS, SKIP_TEMPLATES, NO_SOURCE_FIELDS, PANDOC_SKIP
+    global INPUT_XML, OUTPUT_DIR, IMAGE_MANIFEST_PATH, SKIP_REDIRECTS, SKIP_TEMPLATES, NO_SOURCE_FIELDS, PANDOC_SKIP
     global PANDOC_TO_FORMAT, COOKIES, PANDOC_AVAILABLE, USE_PANDOC
     global WIKI_URL, WIKI_BASE_URL, WIKI_GENERATOR, WIKI_NAME
 
@@ -124,6 +140,7 @@ def config() -> Optional[ET.ElementTree]:
     # Setting global variables
     INPUT_XML = args.input_xml
     OUTPUT_DIR = args.output_dir
+    IMAGE_MANIFEST_PATH = os.path.join(OUTPUT_DIR, IMAGE_MANIFEST_FILENAME)
     SKIP_REDIRECTS = args.skip_redirects
     SKIP_TEMPLATES = not args.include_templates
     NO_SOURCE_FIELDS = args.no_source_fields
@@ -182,6 +199,7 @@ def config() -> Optional[ET.ElementTree]:
                 generator,
                 sitename,
             )
+            load_image_manifest()
             return tree
     raise ValueError("Could not extract wiki domain from <base> tag.")
 
@@ -318,6 +336,166 @@ def prep_wikilinks_download_files_and_get_categories(
     return wikicode, categories
 
 
+def parse_image_manifest_text(text: str) -> Dict[str, Any]:
+    """Parse manifest JSON, ignoring leading ``//`` comment lines (JSONC-style)."""
+    lines = text.splitlines()
+    while lines and (not lines[0].strip() or lines[0].lstrip().startswith("//")):
+        lines.pop(0)
+    return json.loads("\n".join(lines))
+
+
+def load_image_manifest() -> None:
+    """Load wiki file name mappings from ``OUTPUT_DIR/.mediawiki-files.json``."""
+    global image_manifest, image_local_name_owner
+
+    image_manifest = {
+        "version": IMAGE_MANIFEST_VERSION,
+        "wiki_url": None,
+        "files": {},
+    }
+    image_local_name_owner = {}
+
+    path = IMAGE_MANIFEST_PATH
+    if not os.path.isfile(path):
+        return
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = parse_image_manifest_text(f.read())
+    except (json.JSONDecodeError, OSError) as e:
+        logging.warning(f"⚠️ Could not read image manifest {path}: {e}")
+        return
+
+    if data.get("version") != IMAGE_MANIFEST_VERSION:
+        logging.warning(f"⚠️ Unsupported image manifest version: {data.get('version')}")
+        return
+
+    manifest_wiki_url = data.get("wiki_url")
+    if WIKI_URL and manifest_wiki_url and manifest_wiki_url != WIKI_URL:
+        logging.warning(
+            f"⚠️ Image manifest wiki_url ({manifest_wiki_url}) differs from "
+            f"current export ({WIKI_URL}); using manifest anyway."
+        )
+
+    files = data.get("files", {})
+    if not isinstance(files, dict):
+        logging.warning(f"⚠️ Invalid image manifest files section in {path}")
+        return
+
+    image_manifest = data
+    for image_name, entry in files.items():
+        if not isinstance(entry, dict):
+            continue
+        local_filename = entry.get("local")
+        if not local_filename:
+            continue
+        owner = image_local_name_owner.get(local_filename)
+        if owner is not None and owner != image_name:
+            logging.warning(
+                f"⚠️ Image manifest collision: {local_filename!r} claimed by both "
+                f"{owner!r} and {image_name!r}; keeping {owner!r}."
+            )
+            continue
+        image_local_name_owner[local_filename] = image_name
+
+
+def save_image_manifest() -> None:
+    """Write the image manifest to the Obsidian vault root when it has changed."""
+    global image_manifest_dirty
+
+    if not image_manifest_dirty:
+        return
+
+    path = IMAGE_MANIFEST_PATH
+    image_manifest["version"] = IMAGE_MANIFEST_VERSION
+    if WIKI_URL:
+        image_manifest["wiki_url"] = WIKI_URL
+
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(IMAGE_MANIFEST_HEADER)
+            json.dump(image_manifest, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError as e:
+        logging.error(f"‼️ Could not write image manifest {path}: {e}")
+        return
+
+    image_manifest_dirty = False
+
+
+def record_image_manifest_entry(
+    image_name: str, local_filename: str, source_url: Optional[str] = None
+) -> None:
+    """Record or update a wiki file name to local images/ basename mapping."""
+    global image_manifest_dirty
+
+    files = image_manifest.setdefault("files", {})
+    existing = files.get(image_name)
+
+    # Case 1: This wiki file name already maps to this local basename (e.g. re-run or
+    # skip-download). Nothing to change unless we now have a source_url to store.
+    if isinstance(existing, dict) and existing.get("local") == local_filename:
+        if source_url and existing.get("source_url") != source_url:
+            files[image_name] = {**existing, "source_url": source_url}
+            image_manifest_dirty = True
+        image_local_name_owner[local_filename] = image_name
+        return
+
+    # Case 2: First time we see this wiki file name, or its local basename changed
+    # (e.g. after disambiguation). Store the new mapping; keep the old source_url if
+    # we are not downloading again and therefore have no new URL to save.
+    entry: Dict[str, str] = {"local": local_filename}
+    if source_url:
+        entry["source_url"] = source_url
+    elif isinstance(existing, dict) and existing.get("source_url"):
+        entry["source_url"] = existing["source_url"]
+
+    files[image_name] = entry
+    image_local_name_owner[local_filename] = image_name
+    image_manifest_dirty = True
+
+
+def allocate_image_local_filename(image_name: str) -> str:
+    """Return a unique local basename for a wiki file name.
+
+    Uses the manifest when present, otherwise ``clean_filename()``. When two
+    different wiki names sanitize to the same basename, later ones receive
+    ``_1``, ``_2``, etc. before the extension (same scheme as page filenames).
+    """
+    files = image_manifest.get("files", {})
+    entry = files.get(image_name)
+
+    # Case 1: A previous run already mapped this wiki file name (manifest hit). Reuse
+    # that local basename so embeds stay stable across converter runs.
+    if isinstance(entry, dict) and entry.get("local"):
+        local_filename = entry["local"]
+        owner = image_local_name_owner.get(local_filename)
+        if owner is None or owner == image_name:
+            image_local_name_owner[local_filename] = image_name
+            return local_filename
+
+    # Case 2: No manifest entry yet. Try the sanitized wiki name as the local basename
+    # (e.g. "Photo:Test.jpg" → "Photo_Test.jpg") if nothing else owns it yet.
+    safe_name = clean_filename(image_name)
+    owner = image_local_name_owner.get(safe_name)
+    if owner is None or owner == image_name:
+        image_local_name_owner[safe_name] = image_name
+        return safe_name
+
+    # Case 3: Sanitized name is taken by a different wiki file name. Append _1, _2,
+    # … before the extension until we find a free basename (same scheme as pages).
+    base_name, extension = os.path.splitext(safe_name)
+    counter = 1
+    while True:
+        candidate = f"{base_name}_{counter}{extension}"
+        owner = image_local_name_owner.get(candidate)
+        if owner is None or owner == image_name:
+            image_local_name_owner[candidate] = image_name
+            return candidate
+        counter += 1
+
+
 def get_image_url(filename: str) -> Optional[str]:
     """Query the wiki API for the canonical URL of an image file."""
     url = f"{WIKI_URL}/api.php"
@@ -358,36 +536,39 @@ def download_image(image_name: str) -> Optional[str]:
     ):
         return downloaded_images_local_filename[image_name]
 
-    safe_name = clean_filename(image_name)
-    filepath = os.path.join(OUTPUT_DIR, IMAGE_DIR, safe_name)
+    local_filename = allocate_image_local_filename(image_name)
+    filepath = os.path.join(OUTPUT_DIR, IMAGE_DIR, local_filename)
     if os.path.exists(filepath):
-        logging.debug(f"🖼️ Skipping download (already exists): {safe_name}")
-        local_filename: Optional[str] = safe_name
-    else:
-        local_filename = None
-        try:
-            url = get_image_url(f"File:{image_name}")
-        except Exception as e:
-            logging.error(f"‼️ Could not find URL for image: {image_name}: {e}")
-        else:
-            try:
-                resp = requests.get(
-                    url, stream=True, headers={"Cookie": COOKIES} if COOKIES else None
-                )
-                if resp.status_code == 200:
-                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-                    with open(filepath, "wb") as f:
-                        for chunk in resp.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    logging.debug(f"📥 Downloaded image: {safe_name}")
-                    local_filename = safe_name
-                else:
-                    logging.error(f"‼️ Failed to download image: {image_name} ({resp.status_code})")
-            except Exception as e:
-                logging.error(f"‼️ Error downloading {image_name}: {e}")
+        logging.debug(f"🖼️ Skipping download (already exists): {local_filename}")
+        record_image_manifest_entry(image_name, local_filename)
+        downloaded_images_local_filename[image_name] = local_filename
+        return local_filename
 
-    downloaded_images_local_filename[image_name] = local_filename
-    return local_filename
+    resolved_local_filename: Optional[str] = None
+    try:
+        url = get_image_url(f"File:{image_name}")
+    except Exception as e:
+        logging.error(f"‼️ Could not find URL for image: {image_name}: {e}")
+    else:
+        try:
+            resp = requests.get(
+                url, stream=True, headers={"Cookie": COOKIES} if COOKIES else None
+            )
+            if resp.status_code == 200:
+                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                with open(filepath, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                logging.debug(f"📥 Downloaded image: {local_filename}")
+                record_image_manifest_entry(image_name, local_filename, source_url=url)
+                resolved_local_filename = local_filename
+            else:
+                logging.error(f"‼️ Failed to download image: {image_name} ({resp.status_code})")
+        except Exception as e:
+            logging.error(f"‼️ Error downloading {image_name}: {e}")
+
+    downloaded_images_local_filename[image_name] = resolved_local_filename
+    return resolved_local_filename
 
 
 def template_to_dict(template: Template) -> Dict[str, Any]:
@@ -825,6 +1006,7 @@ def main() -> None:
 
     convert_pages(tree)
     create_tag_indexes()
+    save_image_manifest()
     logging.info(f"✅ All done! Markdown vault ready at: {OUTPUT_DIR}")
 
 
